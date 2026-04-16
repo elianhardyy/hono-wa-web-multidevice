@@ -1,0 +1,15 @@
+services:
+  wa-api:
+    build: .
+    container_name: wa-api-service-honojs
+    restart: always
+    ports:
+      # Port kiri (komputermu) : Port kanan (dalam container)
+      - "3000:3000"
+    volumes:
+      # INI SANGAT PENTING: Menyimpan folder sesi login WhatsApp
+      # ke komputer aslimu agar tidak minta Pairing Code lagi kalau server di-restart
+      - ./.wwebjs_auth:/app/.wwebjs_auth
+    environment:
+      # Mengatur zona waktu agar log-nya akurat
+      - TZ=Asia/Jakarta
