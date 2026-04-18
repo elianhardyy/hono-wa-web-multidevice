@@ -161,14 +161,14 @@ docker run -d \
   -e PGHOST=host.docker.internal \
   -e PGPORT=5432 \
   -e PGDATABASE=hono_wa \
-  -e PGUSER=ardianryan \
+  -e PGUSER=username \
   -e PGPASSWORD=your_password \
   -e DEFAULT_ADMIN_USERNAME=admin \
   -e DEFAULT_ADMIN_PASSWORD=admin123 \
   -v $(pwd)/data:/app/data \
   -v $(pwd)/.wwebjs_auth:/app/.wwebjs_auth \
   -v $(pwd)/.wwebjs_cache:/app/.wwebjs_cache \
-  ardianryan/hono-wa-web-multidevice:v2
+  username/hono-wa-web-multidevice:v2
 ```
 
 UI siap diakses di `http://localhost:3000/login`

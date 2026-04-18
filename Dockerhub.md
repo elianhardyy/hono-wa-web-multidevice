@@ -20,7 +20,7 @@ docker run -d \
   -v $(pwd)/data:/app/data \
   -v $(pwd)/.wwebjs_auth:/app/.wwebjs_auth \
   -v $(pwd)/.wwebjs_cache:/app/.wwebjs_cache \
-  ardianryan/hono-wa-web-multidevice:v2
+  username/hono-wa-web-multidevice:v2
 ```
 
 UI siap diakses di:
