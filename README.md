@@ -1,15 +1,35 @@
-```
+<div align="center">
+  <img src="public/assets/uploads/honowa.png" alt="HonoWA" width="180" />
+</div>
+
+# HonoWA — Hono.js + Unofficial WhatsApp API
+
+REST API dan Admin Dashboard untuk mengelola sesi WhatsApp (multi-session) menggunakan **Hono.js** dan **whatsapp-web.js** (unofficial).
+
+```bash
 npm install
 npm run dev
 ```
 
+Buka:
+
 ```
-open http://localhost:3000
+http://localhost:3000/login
 ```
 
-# 📱 WhatsApp Multi-Session API
+## Preview
 
-REST API untuk mengelola sesi WhatsApp secara paralel menggunakan **whatsapp-web.js**, **Hono**, dan **Node.js**.
+**Login**
+
+![Login Page](public/img/1.jpg)
+
+**Dashboard**
+
+![Dashboard](public/img/2.jpg)
+
+**Scan QR WhatsApp**
+
+![Scan QR](public/img/3.jpg)
 
 ---
 
