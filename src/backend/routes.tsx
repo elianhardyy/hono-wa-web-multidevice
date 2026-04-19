@@ -24,7 +24,11 @@ import {
   UserFormPage,
   UsersListPage,
 } from "../frontend/pages/admin/pages.js";
-import { sessions, getOrCreateSession, formatPhone } from "./session-manager.js";
+import {
+  sessions,
+  getOrCreateSession,
+  formatPhone,
+} from "./session-manager.js";
 import { removeSessionFromFile } from "./session-store.js";
 import { SESSION_STATUS, type BroadcastResult } from "./types.js";
 import {
@@ -57,7 +61,9 @@ import {
   updateUserProfilePhotoUrl,
   verifyPassword,
 } from "./auth.js";
-import { ensureDefaultSettings, ensureSchema, getDb } from "./db.js";
+import { ensureDefaultSettings, db } from "./db.js";
+import { eq, and } from "drizzle-orm";
+import { waSessions } from "./schema.js";
 
 const require = createRequire(import.meta.url);
 const { MessageMedia } = require("whatsapp-web.js") as {
@@ -72,10 +78,9 @@ const getAuthUser = async (c: any) => {
   return await getUserBySessionId(sid);
 };
 
-const requireAuth: MiddlewareHandler<{ Variables: { authUser: User } }> = async (
-  c,
-  next,
-) => {
+const requireAuth: MiddlewareHandler<{
+  Variables: { authUser: User };
+}> = async (c, next) => {
   const user = await getAuthUser(c);
   if (!user) return c.redirect("/login");
   const maintenance = await getMaintenanceMode();
@@ -87,10 +92,9 @@ const requireAuth: MiddlewareHandler<{ Variables: { authUser: User } }> = async 
   await next();
 };
 
-const requireAdmin: MiddlewareHandler<{ Variables: { authUser: User } }> = async (
-  c,
-  next,
-) => {
+const requireAdmin: MiddlewareHandler<{
+  Variables: { authUser: User };
+}> = async (c, next) => {
   const user = c.get("authUser");
   if (!user || user.role !== "admin") return c.text("Forbidden", 403);
   await next();
@@ -106,10 +110,9 @@ const getApiKeyFromRequest = (c: any): string | null => {
   return m[1].trim();
 };
 
-const requireApiKey: MiddlewareHandler<{ Variables: { authUser: User } }> = async (
-  c,
-  next,
-) => {
+const requireApiKey: MiddlewareHandler<{
+  Variables: { authUser: User };
+}> = async (c, next) => {
   const apiKey = getApiKeyFromRequest(c);
   if (!apiKey) return c.json({ error: "missing_api_key" }, 401);
   const user = await getUserByApiKey(apiKey);
@@ -124,12 +127,14 @@ const requireApiKey: MiddlewareHandler<{ Variables: { authUser: User } }> = asyn
 
 const isSessionAllowedForUser = async (user: User, sessionId: string) => {
   if (user.role === "admin") return true;
-  const db = getDb();
-  const res = await db.query<{ ok: number }>(
-    `select 1 as ok from wa_sessions where user_id = $1 and session_id = $2 limit 1`,
-    [user.id, sessionId],
-  );
-  return Boolean(res.rows[0]?.ok);
+  const result = await db
+    .select()
+    .from(waSessions)
+    .where(
+      and(eq(waSessions.userId, user.id), eq(waSessions.sessionId, sessionId)),
+    )
+    .limit(1);
+  return result.length > 0;
 };
 
 const md5Hex = (value: string) =>
@@ -173,7 +178,10 @@ const saveUploadedFile = async (
     if (contentType === "image/jpeg") return "jpg";
     if (contentType === "image/webp") return "webp";
     if (contentType === "image/svg+xml") return "svg";
-    if (contentType === "image/x-icon" || contentType === "image/vnd.microsoft.icon")
+    if (
+      contentType === "image/x-icon" ||
+      contentType === "image/vnd.microsoft.icon"
+    )
       return "ico";
     const name = String(file.name ?? "");
     const m = name.match(/\.([a-zA-Z0-9]+)$/);
@@ -189,7 +197,11 @@ const saveUploadedFile = async (
   return `/assets/uploads/${filename}`;
 };
 
-const withToast = (url: string, message: string, type: "success" | "error" | "info" = "info") => {
+const withToast = (
+  url: string,
+  message: string,
+  type: "success" | "error" | "info" = "info",
+) => {
   const sep = url.includes("?") ? "&" : "?";
   return (
     url +
@@ -203,7 +215,6 @@ const withToast = (url: string, message: string, type: "success" | "error" | "in
 
 router.get("/login", async (c) => {
   try {
-    await ensureSchema();
     await ensureDefaultSettings();
     await ensureDefaultAdmin();
   } catch (err) {
@@ -234,7 +245,6 @@ router.get("/login", async (c) => {
 
 router.post("/login", async (c) => {
   try {
-    await ensureSchema();
     await ensureDefaultSettings();
     await ensureDefaultAdmin();
   } catch (err) {
@@ -323,10 +333,14 @@ router.get("/admin", requireAuth, async (c) => {
   const avatarUrl = getAvatarUrl(user);
   const users = user.role === "admin" ? await listUsers() : [];
   const waSessions =
-    user.role === "admin" ? await listWaSessionsAll() : await listWaSessionsForUser(user.id);
+    user.role === "admin"
+      ? await listWaSessionsAll()
+      : await listWaSessionsForUser(user.id);
   // Runtime count should only include sessions that exist in app DB list
   // so dashboard does not show stale in-memory/restored sessions.
-  const allowedSessionIds = new Set((waSessions as any[]).map((s) => s.sessionId));
+  const allowedSessionIds = new Set(
+    (waSessions as any[]).map((s) => s.sessionId),
+  );
   const runtimeCount = Array.from(sessions.keys()).filter((sid) =>
     allowedSessionIds.has(sid),
   ).length;
@@ -365,7 +379,8 @@ router.get("/admin/api-docs", requireAuth, async (c) => {
   const { appName, appDescription, appLogoUrl } = await getUiSettings();
   const avatarUrl = getAvatarUrl(user);
   const flashApiKey = getCookie(c, "flash_api_key");
-  if (flashApiKey) deleteCookie(c, "flash_api_key", { path: "/admin/api-docs" });
+  if (flashApiKey)
+    deleteCookie(c, "flash_api_key", { path: "/admin/api-docs" });
   return c.html(
     <ApiDocsPage
       appName={appName}
@@ -390,7 +405,13 @@ router.post("/admin/api-docs/api-key/rotate", requireAuth, async (c) => {
     path: "/admin/api-docs",
     maxAge: 60,
   });
-  return c.redirect(withToast("/admin/api-docs", "API Key berhasil digenerate ulang", "success"));
+  return c.redirect(
+    withToast(
+      "/admin/api-docs",
+      "API Key berhasil digenerate ulang",
+      "success",
+    ),
+  );
 });
 
 router.get("/admin/users", requireAuth, requireAdmin, async (c) => {
@@ -455,7 +476,9 @@ router.post("/admin/users/new", requireAuth, requireAdmin, async (c) => {
 
   try {
     await createUser({ username, password, role, maxDevices });
-    return c.redirect(withToast("/admin/users", "User berhasil dibuat", "success"));
+    return c.redirect(
+      withToast("/admin/users", "User berhasil dibuat", "success"),
+    );
   } catch {
     return c.html(
       <UserFormPage
@@ -514,21 +537,36 @@ router.post("/admin/users/:id/edit", requireAuth, requireAdmin, async (c) => {
         logoUrl={appLogoUrl}
         avatarUrl={avatarUrl}
         mode="edit"
-        user={{ id, username, role, maxDevices, createdAt: new Date().toISOString() }}
+        user={{
+          id,
+          username,
+          role,
+          maxDevices,
+          createdAt: new Date().toISOString(),
+        }}
         alert="Username wajib diisi"
       />,
       400,
     );
   }
 
-  await updateUser(id, { username, role, maxDevices, password: password || undefined });
-  return c.redirect(withToast("/admin/users", "User berhasil diperbarui", "success"));
+  await updateUser(id, {
+    username,
+    role,
+    maxDevices,
+    password: password || undefined,
+  });
+  return c.redirect(
+    withToast("/admin/users", "User berhasil diperbarui", "success"),
+  );
 });
 
 router.post("/admin/users/:id/delete", requireAuth, requireAdmin, async (c) => {
   const id = c.req.param("id");
   await deleteUser(id);
-  return c.redirect(withToast("/admin/users", "User berhasil dihapus", "success"));
+  return c.redirect(
+    withToast("/admin/users", "User berhasil dihapus", "success"),
+  );
 });
 
 router.get("/admin/settings", requireAuth, requireAdmin, async (c) => {
@@ -552,7 +590,9 @@ router.post("/admin/settings", requireAuth, requireAdmin, async (c) => {
   const user = c.get("authUser");
   const body = await c.req.parseBody();
   const appName = String(body.appName ?? "HonoWA").trim() || "HonoWA";
-  const maintenance = String(body.maintenance ?? "") === "on" || String(body.maintenance) === "true";
+  const maintenance =
+    String(body.maintenance ?? "") === "on" ||
+    String(body.maintenance) === "true";
   const appDescription = String(body.appDescription ?? "").trim();
   const logoFile = (body as any).logo;
 
@@ -576,14 +616,19 @@ router.post("/admin/settings", requireAuth, requireAdmin, async (c) => {
   await setAppDescription(appDescription);
   await setMaintenanceMode(maintenance);
   if (logoUrl) await setAppLogoUrl(logoUrl);
-  return c.redirect(withToast("/admin/settings", "Pengaturan disimpan", "success"));
+  return c.redirect(
+    withToast("/admin/settings", "Pengaturan disimpan", "success"),
+  );
 });
 
 router.get("/admin/profile", requireAuth, async (c) => {
   const user = c.get("authUser");
   const ui = await getUiSettings();
   const avatarUrl = getAvatarUrl(user);
-  const gravatarUrl = getGravatarUrl(user.email?.trim() ? user.email : user.username, 96);
+  const gravatarUrl = getGravatarUrl(
+    user.email?.trim() ? user.email : user.username,
+    96,
+  );
   return c.html(
     <ProfilePage
       appName={ui.appName}
@@ -602,7 +647,10 @@ router.post("/admin/profile", requireAuth, async (c) => {
   const user = c.get("authUser");
   const ui = await getUiSettings();
   const avatarUrl = getAvatarUrl(user);
-  const gravatarUrl = getGravatarUrl(user.email?.trim() ? user.email : user.username, 96);
+  const gravatarUrl = getGravatarUrl(
+    user.email?.trim() ? user.email : user.username,
+    96,
+  );
 
   const body = await c.req.parseBody();
   const email = String(body.email ?? "").trim();
@@ -637,7 +685,9 @@ router.post("/admin/profile", requireAuth, async (c) => {
     await updateUserProfilePhotoUrl(user.id, photoUrl);
   }
 
-  const wantsPasswordChange = Boolean(currentPassword || newPassword || newPassword2);
+  const wantsPasswordChange = Boolean(
+    currentPassword || newPassword || newPassword2,
+  );
   if (wantsPasswordChange) {
     if (!currentPassword || !newPassword || !newPassword2) {
       return c.html(
@@ -648,7 +698,7 @@ router.post("/admin/profile", requireAuth, async (c) => {
           logoUrl={ui.appLogoUrl}
           avatarUrl={photoUrl ?? avatarUrl}
           gravatarUrl={gravatarUrl}
-          profilePhotoUrl={photoUrl ?? (user.profilePhotoUrl ?? null)}
+          profilePhotoUrl={photoUrl ?? user.profilePhotoUrl ?? null}
           email={email || user.email || ""}
           alert="Isi password saat ini dan password baru (2x)."
         />,
@@ -664,7 +714,7 @@ router.post("/admin/profile", requireAuth, async (c) => {
           logoUrl={ui.appLogoUrl}
           avatarUrl={photoUrl ?? avatarUrl}
           gravatarUrl={gravatarUrl}
-          profilePhotoUrl={photoUrl ?? (user.profilePhotoUrl ?? null)}
+          profilePhotoUrl={photoUrl ?? user.profilePhotoUrl ?? null}
           email={email || user.email || ""}
           alert="Password baru minimal 6 karakter."
         />,
@@ -680,7 +730,7 @@ router.post("/admin/profile", requireAuth, async (c) => {
           logoUrl={ui.appLogoUrl}
           avatarUrl={photoUrl ?? avatarUrl}
           gravatarUrl={gravatarUrl}
-          profilePhotoUrl={photoUrl ?? (user.profilePhotoUrl ?? null)}
+          profilePhotoUrl={photoUrl ?? user.profilePhotoUrl ?? null}
           email={email || user.email || ""}
           alert="Konfirmasi password baru tidak sama."
         />,
@@ -699,7 +749,7 @@ router.post("/admin/profile", requireAuth, async (c) => {
           logoUrl={ui.appLogoUrl}
           avatarUrl={photoUrl ?? avatarUrl}
           gravatarUrl={gravatarUrl}
-          profilePhotoUrl={photoUrl ?? (user.profilePhotoUrl ?? null)}
+          profilePhotoUrl={photoUrl ?? user.profilePhotoUrl ?? null}
           email={email || user.email || ""}
           alert="Password saat ini salah."
         />,
@@ -709,7 +759,9 @@ router.post("/admin/profile", requireAuth, async (c) => {
     await updateUserPassword(user.id, newPassword);
   }
 
-  return c.redirect(withToast("/admin/profile", "Profil diperbarui", "success"));
+  return c.redirect(
+    withToast("/admin/profile", "Profil diperbarui", "success"),
+  );
 });
 
 router.get("/admin/sessions", requireAuth, async (c) => {
@@ -717,7 +769,9 @@ router.get("/admin/sessions", requireAuth, async (c) => {
   const { appName, appDescription, appLogoUrl } = await getUiSettings();
   const avatarUrl = getAvatarUrl(user);
   const waSessions =
-    user.role === "admin" ? await listWaSessionsAll() : await listWaSessionsForUser(user.id);
+    user.role === "admin"
+      ? await listWaSessionsAll()
+      : await listWaSessionsForUser(user.id);
   const runtimeIds = Array.from(sessions.keys());
   const openQrSessionId = c.req.query("openQr") ?? undefined;
   return c.html(
@@ -745,7 +799,9 @@ router.post("/admin/sessions/new", requireAuth, async (c) => {
   const sessionId = String(body.sessionId ?? "").trim();
 
   const waSessions =
-    user.role === "admin" ? await listWaSessionsAll() : await listWaSessionsForUser(user.id);
+    user.role === "admin"
+      ? await listWaSessionsAll()
+      : await listWaSessionsForUser(user.id);
   const runtimeIds = Array.from(sessions.keys());
 
   if (!sessionId) {
@@ -822,7 +878,13 @@ router.post("/admin/sessions/:sessionId/delete", requireAuth, async (c) => {
   const sessionId = c.req.param("sessionId");
   const allowed = await isSessionAllowedForUser(user, sessionId);
   if (!allowed) {
-    return c.redirect(withToast("/admin/sessions", "Session tidak valid untuk user ini", "error"));
+    return c.redirect(
+      withToast(
+        "/admin/sessions",
+        "Session tidak valid untuk user ini",
+        "error",
+      ),
+    );
   }
 
   try {
@@ -840,32 +902,42 @@ router.post("/admin/sessions/:sessionId/delete", requireAuth, async (c) => {
     }
 
     removeSessionFromFile(sessionId);
-    const db = getDb();
     if (user.role === "admin") {
-      await db.query(`delete from wa_sessions where session_id = $1`, [sessionId]);
+      await db.delete(waSessions).where(eq(waSessions.sessionId, sessionId));
     } else {
-      await db.query(`delete from wa_sessions where user_id = $2 and session_id = $1`, [
-        sessionId,
-        user.id,
-      ]);
+      await db
+        .delete(waSessions)
+        .where(
+          and(
+            eq(waSessions.userId, user.id),
+            eq(waSessions.sessionId, sessionId),
+          ),
+        );
     }
 
-    return c.redirect(withToast("/admin/sessions", "Session berhasil dihapus", "success"));
+    return c.redirect(
+      withToast("/admin/sessions", "Session berhasil dihapus", "success"),
+    );
   } catch {
     try {
       sessions.delete(sessionId);
       removeSessionFromFile(sessionId);
-      const db = getDb();
       if (user.role === "admin") {
-        await db.query(`delete from wa_sessions where session_id = $1`, [sessionId]);
+        await db.delete(waSessions).where(eq(waSessions.sessionId, sessionId));
       } else {
-        await db.query(`delete from wa_sessions where user_id = $2 and session_id = $1`, [
-          sessionId,
-          user.id,
-        ]);
+        await db
+          .delete(waSessions)
+          .where(
+            and(
+              eq(waSessions.userId, user.id),
+              eq(waSessions.sessionId, sessionId),
+            ),
+          );
       }
     } catch {}
-    return c.redirect(withToast("/admin/sessions", "Gagal menghapus session", "error"));
+    return c.redirect(
+      withToast("/admin/sessions", "Gagal menghapus session", "error"),
+    );
   }
 });
 
@@ -873,9 +945,12 @@ router.get("/admin/session-qr/:sessionId", requireAuth, async (c) => {
   const user = c.get("authUser");
   const sessionId = c.req.param("sessionId");
   const waSessions =
-    user.role === "admin" ? await listWaSessionsAll() : await listWaSessionsForUser(user.id);
+    user.role === "admin"
+      ? await listWaSessionsAll()
+      : await listWaSessionsForUser(user.id);
   const allowed =
-    user.role === "admin" || (waSessions as any).some((s: any) => s.sessionId === sessionId);
+    user.role === "admin" ||
+    (waSessions as any).some((s: any) => s.sessionId === sessionId);
 
   if (!allowed) {
     return c.json({ error: "Session tidak valid untuk user ini" }, 403);
@@ -907,7 +982,11 @@ router.get("/admin/session-qr/:sessionId", requireAuth, async (c) => {
 
   if (!qrData) {
     return c.json(
-      { status: "pending", sessionId, message: "QR belum siap, tunggu sebentar..." },
+      {
+        status: "pending",
+        sessionId,
+        message: "QR belum siap, tunggu sebentar...",
+      },
       202,
     );
   }
@@ -926,7 +1005,9 @@ router.get("/admin/message", requireAuth, async (c) => {
   const { appName, appDescription, appLogoUrl } = await getUiSettings();
   const avatarUrl = getAvatarUrl(user);
   const waSessions =
-    user.role === "admin" ? await listWaSessionsAll() : await listWaSessionsForUser(user.id);
+    user.role === "admin"
+      ? await listWaSessionsAll()
+      : await listWaSessionsForUser(user.id);
   const selectedSessionId = c.req.query("sessionId") ?? undefined;
   return c.html(
     <MessagePage
@@ -951,10 +1032,13 @@ router.post("/admin/message/send", requireAuth, async (c) => {
   const message = String(body.message ?? "");
 
   const waSessions =
-    user.role === "admin" ? await listWaSessionsAll() : await listWaSessionsForUser(user.id);
+    user.role === "admin"
+      ? await listWaSessionsAll()
+      : await listWaSessionsForUser(user.id);
 
   const allowed =
-    user.role === "admin" || (waSessions as any).some((s: any) => s.sessionId === sessionId);
+    user.role === "admin" ||
+    (waSessions as any).some((s: any) => s.sessionId === sessionId);
   if (!allowed) {
     return c.html(
       <MessagePage
@@ -972,7 +1056,8 @@ router.post("/admin/message/send", requireAuth, async (c) => {
   }
 
   try {
-    const sessionData = sessions.get(sessionId) ?? getOrCreateSession(sessionId);
+    const sessionData =
+      sessions.get(sessionId) ?? getOrCreateSession(sessionId);
     if (sessionData.status !== SESSION_STATUS.READY) {
       return c.html(
         <MessagePage
@@ -1019,7 +1104,9 @@ router.get("/admin/broadcast", requireAuth, async (c) => {
   const { appName, appDescription, appLogoUrl } = await getUiSettings();
   const avatarUrl = getAvatarUrl(user);
   const waSessions =
-    user.role === "admin" ? await listWaSessionsAll() : await listWaSessionsForUser(user.id);
+    user.role === "admin"
+      ? await listWaSessionsAll()
+      : await listWaSessionsForUser(user.id);
   const selectedSessionId = c.req.query("sessionId") ?? undefined;
   return c.html(
     <BroadcastPage
@@ -1045,10 +1132,13 @@ router.post("/admin/broadcast/send", requireAuth, async (c) => {
   const delayMs = Math.max(0, Number(body.delayMs ?? 2000));
 
   const waSessions =
-    user.role === "admin" ? await listWaSessionsAll() : await listWaSessionsForUser(user.id);
+    user.role === "admin"
+      ? await listWaSessionsAll()
+      : await listWaSessionsForUser(user.id);
 
   const allowed =
-    user.role === "admin" || (waSessions as any).some((s: any) => s.sessionId === sessionId);
+    user.role === "admin" ||
+    (waSessions as any).some((s: any) => s.sessionId === sessionId);
   if (!allowed) {
     return c.html(
       <BroadcastPage
@@ -1071,7 +1161,8 @@ router.post("/admin/broadcast/send", requireAuth, async (c) => {
     .filter(Boolean);
 
   try {
-    const sessionData = sessions.get(sessionId) ?? getOrCreateSession(sessionId);
+    const sessionData =
+      sessions.get(sessionId) ?? getOrCreateSession(sessionId);
     if (sessionData.status !== SESSION_STATUS.READY) {
       return c.html(
         <BroadcastPage
@@ -1127,7 +1218,9 @@ router.get("/admin/status", requireAuth, async (c) => {
   const { appName, appDescription, appLogoUrl } = await getUiSettings();
   const avatarUrl = getAvatarUrl(user);
   const waSessions =
-    user.role === "admin" ? await listWaSessionsAll() : await listWaSessionsForUser(user.id);
+    user.role === "admin"
+      ? await listWaSessionsAll()
+      : await listWaSessionsForUser(user.id);
   const selectedSessionId = c.req.query("sessionId") ?? undefined;
   return c.html(
     <StatusPage
@@ -1152,10 +1245,13 @@ router.post("/admin/status/create", requireAuth, async (c) => {
   const mediaUrl = String(body.mediaUrl ?? "").trim();
 
   const waSessions =
-    user.role === "admin" ? await listWaSessionsAll() : await listWaSessionsForUser(user.id);
+    user.role === "admin"
+      ? await listWaSessionsAll()
+      : await listWaSessionsForUser(user.id);
 
   const allowed =
-    user.role === "admin" || (waSessions as any).some((s: any) => s.sessionId === sessionId);
+    user.role === "admin" ||
+    (waSessions as any).some((s: any) => s.sessionId === sessionId);
   if (!allowed) {
     return c.html(
       <StatusPage
@@ -1173,7 +1269,8 @@ router.post("/admin/status/create", requireAuth, async (c) => {
   }
 
   try {
-    const sessionData = sessions.get(sessionId) ?? getOrCreateSession(sessionId);
+    const sessionData =
+      sessions.get(sessionId) ?? getOrCreateSession(sessionId);
     if (sessionData.status !== SESSION_STATUS.READY) {
       return c.html(
         <StatusPage
@@ -1243,7 +1340,9 @@ router.get("/session/qr/:sessionId", requireAuth, async (c) => {
   const sessionData = getOrCreateSession(sessionId);
 
   if (sessionData.status === SESSION_STATUS.READY) {
-    return c.redirect(`/admin/sessions?sessionId=${encodeURIComponent(sessionId)}`);
+    return c.redirect(
+      `/admin/sessions?sessionId=${encodeURIComponent(sessionId)}`,
+    );
   }
 
   let qrData = sessionData.qr ?? null;
@@ -1263,7 +1362,9 @@ router.get("/session/qr/:sessionId", requireAuth, async (c) => {
   }
 
   if (!qrData && sessionData.status === SESSION_STATUS.READY) {
-    return c.redirect(`/admin/sessions?sessionId=${encodeURIComponent(sessionId)}`);
+    return c.redirect(
+      `/admin/sessions?sessionId=${encodeURIComponent(sessionId)}`,
+    );
   }
 
   if (!qrData) {
@@ -1296,12 +1397,16 @@ router.get("/session/qr/:sessionId", requireAuth, async (c) => {
       <body>
         <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f9f9ff;padding:18px;">
           <div style="background:#fff;border:1px solid rgba(199,196,216,0.35);border-radius:18px;padding:18px;max-width:560px;width:100%;text-align:center;box-shadow:0 14px 36px rgba(17,24,39,0.06);">
-            <div style="font-weight:900;font-size:18px;margin-bottom:10px;">Scan QR</div>
+            <div style="font-weight:900;font-size:18px;margin-bottom:10px;">
+              Scan QR
+            </div>
             <div style="border:3px solid #25d366;border-radius:16px;padding:14px;display:inline-block;">
               <img src={qrImageUrl} alt="QR" width="260" height="260" />
             </div>
             <div style="margin-top:14px;">
-              <a href={`/session/qr/${encodeURIComponent(sessionId)}`}>Refresh</a>
+              <a href={`/session/qr/${encodeURIComponent(sessionId)}`}>
+                Refresh
+              </a>
             </div>
           </div>
         </div>
@@ -1365,7 +1470,9 @@ router.get("/session/status/:sessionId", requireApiKey, async (c) => {
 router.get("/sessions", requireApiKey, async (c) => {
   const user = c.get("authUser");
   const allowedSessions =
-    user.role === "admin" ? await listWaSessionsAll() : await listWaSessionsForUser(user.id);
+    user.role === "admin"
+      ? await listWaSessionsAll()
+      : await listWaSessionsForUser(user.id);
   const list = (allowedSessions as any[]).map((s) => {
     const sessionId = s.sessionId;
     const runtime = sessions.get(sessionId);
@@ -1455,7 +1562,10 @@ router.post("/send-group/:sessionId", requireApiKey, async (c) => {
     const { groupId, message } = body;
 
     if (!groupId || !message) {
-      return c.json({ error: 'Field "groupId" dan "message" wajib diisi' }, 400);
+      return c.json(
+        { error: 'Field "groupId" dan "message" wajib diisi' },
+        400,
+      );
     }
 
     await sessionData.client.sendMessage(groupId, message);
@@ -1503,7 +1613,10 @@ router.post("/status/:sessionId", requireApiKey, async (c) => {
       });
     } else {
       if (!text) {
-        return c.json({ error: 'Field "text" wajib diisi jika tanpa media' }, 400);
+        return c.json(
+          { error: 'Field "text" wajib diisi jika tanpa media' },
+          400,
+        );
       }
       await sessionData.client.sendMessage("status@broadcast", text);
     }
@@ -1530,21 +1643,27 @@ router.delete("/session/:sessionId", requireApiKey, async (c) => {
     const sessionData = sessions.get(sessionId);
 
     if (!sessionData) {
-      return c.json({ error: `Sesi '${sessionId}' tidak ditemukan di memori` }, 404);
+      return c.json(
+        { error: `Sesi '${sessionId}' tidak ditemukan di memori` },
+        404,
+      );
     }
 
     await sessionData.client.logout();
     await sessionData.client.destroy();
     sessions.delete(sessionId);
     removeSessionFromFile(sessionId);
-    const db = getDb();
     if (user.role === "admin") {
-      await db.query(`delete from wa_sessions where session_id = $1`, [sessionId]);
+      await db.delete(waSessions).where(eq(waSessions.sessionId, sessionId));
     } else {
-      await db.query(`delete from wa_sessions where user_id = $2 and session_id = $1`, [
-        sessionId,
-        user.id,
-      ]);
+      await db
+        .delete(waSessions)
+        .where(
+          and(
+            eq(waSessions.userId, user.id),
+            eq(waSessions.sessionId, sessionId),
+          ),
+        );
     }
 
     return c.json({
@@ -1556,7 +1675,8 @@ router.delete("/session/:sessionId", requireApiKey, async (c) => {
     removeSessionFromFile(sessionId);
     return c.json(
       {
-        error: "Gagal logout dengan bersih, tetapi sesi telah dihapus dari memori",
+        error:
+          "Gagal logout dengan bersih, tetapi sesi telah dihapus dari memori",
         details: error.toString(),
       },
       500,
@@ -1596,7 +1716,8 @@ router.post("/broadcast/:sessionId", requireApiKey, async (c) => {
 
   const phones: string[] = body.phones;
   const message: string = body.message;
-  const delayMs: number = typeof body.delayMs === "number" ? body.delayMs : 2000;
+  const delayMs: number =
+    typeof body.delayMs === "number" ? body.delayMs : 2000;
 
   if (!Array.isArray(phones) || phones.length === 0) {
     return c.json(

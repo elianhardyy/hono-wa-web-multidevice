@@ -7,7 +7,7 @@ import backendApp from "./backend/app.js";
 import frontendApp from "./frontend/app.js";
 import { restoreSessionsFromFile } from "./backend/session-manager.js";
 import { ensureDefaultAdmin } from "./backend/auth.js";
-import { ensureDefaultSettings, ensureSchema } from "./backend/db.js";
+import { ensureDefaultSettings } from "./backend/db.js";
 
 config({ path: path.resolve(".env") });
 
@@ -18,7 +18,6 @@ app.route("/", frontendApp);
 app.route("/", backendApp);
 
 try {
-  await ensureSchema();
   await ensureDefaultSettings();
   await ensureDefaultAdmin();
 } catch (err) {
