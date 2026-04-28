@@ -9,3 +9,4 @@ export { StatusPage } from "./StatusPage.js";
 export { HelpPage } from "./HelpPage.js";
 export { ApiDocsPage } from "./ApiDocsPage.js";
 export { ProfilePage } from "./ProfilePage.js";
+export { AiPage } from "./AiPage.js";

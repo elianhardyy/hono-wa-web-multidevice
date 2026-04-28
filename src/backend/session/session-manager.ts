@@ -4,7 +4,7 @@
 
 import { createRequire } from "module";
 import crypto from "crypto";
-import { SESSION_STATUS, type SessionData } from "./types.js";
+import { SESSION_STATUS, type SessionData } from "../utils/types.js";
 import {
   persistSession,
   removeSessionFromFile,
@@ -15,8 +15,8 @@ import {
   webhookSessionReady,
   webhookSessionQR,
   webhookSessionDisconnected,
-} from "./webhook.js";
-import { createActionLog } from "./auth.js";
+} from "../webhook/webhook.js";
+import { createActionLog } from "../utils/auth.js";
 
 const require = createRequire(import.meta.url);
 const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js") as {
