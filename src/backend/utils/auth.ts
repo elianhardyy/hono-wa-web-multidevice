@@ -1,7 +1,7 @@
 import crypto from "crypto";
-import { db, getSetting, setSetting } from "./db.js";
+import { db, getSetting, setSetting } from "../config/db.js";
 import { and, desc, eq, gt, inArray } from "drizzle-orm";
-import { actionLogs, authSessions, users, waSessions } from "./schema.js";
+import { actionLogs, authSessions, users, waSessions } from "../config/schema.js";
 
 export type Role = "admin" | "user";
 

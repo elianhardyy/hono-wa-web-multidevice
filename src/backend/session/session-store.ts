@@ -4,7 +4,7 @@
 
 import fs from "fs";
 import path from "path";
-import type { SessionData, SessionRecord } from "./types.js";
+import type { SessionData, SessionRecord } from "../utils/types.js";
 
 const DATA_DIR = path.resolve("data");
 const SESSION_FILE = path.join(DATA_DIR, "session.json");

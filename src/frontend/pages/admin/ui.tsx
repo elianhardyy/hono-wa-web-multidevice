@@ -10,6 +10,7 @@ export type AdminNavKey =
   | "users"
   | "settings"
   | "apiDocs"
+  | "ai"
   | "profile";
 
 const baseCss = `
@@ -595,6 +596,12 @@ export const AdminLayout: FC<{
               label="API Docs"
               icon="fa-solid fa-book"
               active={props.active === "apiDocs"}
+            />
+            <NavItem
+              href="/admin/ai"
+              label="AI Assistant"
+              icon="fa-solid fa-robot"
+              active={props.active === "ai"}
             />
           </nav>
 
