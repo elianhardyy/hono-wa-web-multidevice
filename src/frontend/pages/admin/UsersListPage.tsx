@@ -49,39 +49,43 @@ export const UsersListPage: FC<
         {props.isLoading ? (
           <Skeleton height={300} />
         ) : (
-        <table class="table">
-          <thead>
-            <tr>
-              <th>Username</th>
-              <th>Role</th>
-              <th>Max Device</th>
-              <th>Dibuat</th>
-              <th>Aksi</th>
-            </tr>
-          </thead>
-          <tbody>
-            {props.users.map((u) => (
+        <div class="tableResponsive">
+          <table class="table">
+            <thead>
               <tr>
-                <td>{u.username}</td>
-                <td class="muted">{u.role}</td>
-                <td class="muted">{String(u.maxDevices)}</td>
-                <td class="muted">{new Date(u.createdAt).toLocaleString()}</td>
-                <td>
-                  <div class="btnRow">
-                    <a class="btn" href={`/admin/users/${u.id}/edit`}>
-                      Edit
-                    </a>
-                    <form method="post" action={`/admin/users/${u.id}/delete`}>
-                      <button class="btn danger" type="submit">
-                        Hapus
-                      </button>
-                    </form>
-                  </div>
-                </td>
+                <th>Username</th>
+                <th>Role</th>
+                <th>Max Device</th>
+                <th>Dibuat</th>
+                <th>Aksi</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {props.users.map((u) => (
+                <tr>
+                  <td>{u.username}</td>
+                  <td class="muted">{u.role}</td>
+                  <td class="muted">{String(u.maxDevices)}</td>
+                  <td class="muted">{new Date(u.createdAt).toLocaleString()}</td>
+                  <td>
+                    <div class="btnRow">
+                      <a class="btn warning" href={`/admin/users/${u.id}/edit`}>
+                        <i class="fa-solid fa-pen-to-square" style="margin-right: 6px;"></i>
+                        Edit
+                      </a>
+                      <form method="post" action={`/admin/users/${u.id}/delete`}>
+                        <button class="btn danger" type="submit">
+                          <i class="fa-solid fa-trash" style="margin-right: 6px;"></i>
+                          Hapus
+                        </button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         )}
       </div>
     </div>

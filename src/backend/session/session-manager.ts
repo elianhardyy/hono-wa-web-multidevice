@@ -228,7 +228,7 @@ const processBroadcastQueue = async (sessionId: string) => {
             success: false,
             error: job.error,
           });
-        } catch {}
+        } catch { }
         continue;
       }
 
@@ -302,11 +302,11 @@ const processBroadcastQueue = async (sessionId: string) => {
             message: job.message,
             media: job.media
               ? {
-                  source: job.media.source,
-                  filename: job.media.filename,
-                  mimetype: job.media.mimetype,
-                  size: job.media.size,
-                }
+                source: job.media.source,
+                filename: job.media.filename,
+                mimetype: job.media.mimetype,
+                size: job.media.size,
+              }
               : null,
             delayMs: job.delayMs,
             summary: job.summary,
@@ -315,7 +315,7 @@ const processBroadcastQueue = async (sessionId: string) => {
           success: job.status === "done",
           error: job.error ?? null,
         });
-      } catch {}
+      } catch { }
     }
   } finally {
     broadcastProcessing.delete(sessionId);
@@ -360,18 +360,18 @@ export const enqueueBroadcastJob = async (input: {
         message: job.message,
         media: job.media
           ? {
-              source: job.media.source,
-              filename: job.media.filename,
-              mimetype: job.media.mimetype,
-              size: job.media.size,
-            }
+            source: job.media.source,
+            filename: job.media.filename,
+            mimetype: job.media.mimetype,
+            size: job.media.size,
+          }
           : null,
         delayMs: job.delayMs,
       },
       success: true,
       error: null,
     });
-  } catch {}
+  } catch { }
 
   void processBroadcastQueue(input.sessionId);
   return job;

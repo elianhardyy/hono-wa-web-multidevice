@@ -7,7 +7,7 @@ export const HistoryChatPrompt: FC<{ history: AiChatHistory[] }> = (props) => {
   return (
     <div class="card" style="margin-top: 18px;">
       <div class="statLabel">Chat History & Prompts</div>
-      <div style="margin-top: 12px; overflow-x: auto;">
+      <div class="tableResponsive" style="margin-top: 12px;">
         {history.length === 0 ? (
           <div class="muted" style="padding: 20px; text-align: center; font-size: 14px;">
             Belum ada riwayat chat.
