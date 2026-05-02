@@ -48,10 +48,15 @@ export const getOrCreateSession = (sessionId: string): SessionData => {
         "--disable-software-rasterizer",
         "--disable-dev-shm-usage",
         "--no-zygote",
+        "--disable-extensions",
+        "--no-first-run",
       ],
-      headless: true,
+      headless: "new" as any,
     },
   });
+
+  // Mencegah MaxListenersExceededWarning saat banyak request QR/pairing simultan
+  client.setMaxListeners(20);
 
   const sessionData: SessionData = {
     client,
