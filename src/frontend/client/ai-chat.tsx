@@ -3,12 +3,91 @@ import React, { useState, useRef, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { useChat, fetchServerSentEvents } from "@tanstack/ai-react";
 
+const ThinkingBlock = ({ content, isStreaming }: { content: string; isStreaming?: boolean }) => {
+  const [isOpen, setIsOpen] = useState(isStreaming);
+
+  useEffect(() => {
+    setIsOpen(!!isStreaming);
+  }, [isStreaming]);
+
+  return (
+    <div style={styles.thinkingContainer}>
+      <div 
+        onClick={() => setIsOpen(!isOpen)} 
+        style={styles.thinkingHeader}
+      >
+        <i className="fa-solid fa-brain" style={{ marginRight: "6px", fontSize: "11px" }} />
+        <span style={{ flex: 1 }}>{isStreaming ? "Thinking..." : "Thinking Process"}</span>
+        <i className={`fa-solid fa-chevron-${isOpen ? 'up' : 'down'}`} style={{ fontSize: "10px", opacity: 0.7 }} />
+      </div>
+      {isOpen && (
+        <div style={styles.thinkingContent}>
+          {content}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const AiChat = () => {
+  const parseContent = (content: string) => {
+    if (content.startsWith("[IMAGE]")) {
+      return [{ type: "image", url: content.replace("[IMAGE]", "") }];
+    }
+
+    // Find the LAST </thinking> tag — everything before it is the "thinking area"
+    const lastThinkingEnd = content.lastIndexOf("</thinking>");
+    if (lastThinkingEnd === -1) {
+      // No thinking tags — plain text
+      return [{ type: "text", content }];
+    }
+
+    // Extract ALL thinking content from all <thinking> blocks before the last </thinking>
+    const thinkingArea = content.substring(0, lastThinkingEnd + "</thinking>".length);
+    const answerText = content.substring(lastThinkingEnd + "</thinking>".length).trim();
+
+    // Merge all <thinking>...</thinking> blocks into one
+    const thinkingRegex = /<thinking>([\s\S]*?)<\/thinking>/g;
+    let thinkingContent = "";
+    let match;
+    while ((match = thinkingRegex.exec(thinkingArea)) !== null) {
+      thinkingContent += match[1];
+    }
+
+    const parts: any[] = [];
+    if (thinkingContent) parts.push({ type: "thinking", content: thinkingContent });
+    if (answerText) parts.push({ type: "text", content: answerText });
+    if (parts.length === 0) parts.push({ type: "text", content });
+    return parts;
+  };
+
+  const rootEl = document.getElementById("ai-chat-root");
+  const initialHistory = JSON.parse(rootEl?.dataset.history || "[]").map((h: any) => {
+    const parts: any[] = [];
+    // Reasoning is now stored in a separate column
+    if (h.reasoning) {
+      parts.push({ type: "thinking", content: h.reasoning });
+    }
+    // Content is the plain answer
+    if (h.content) {
+      // Still parse for [IMAGE] prefix and legacy <thinking> tags in old data
+      const contentParts = parseContent(h.content);
+      parts.push(...contentParts);
+    }
+    return {
+      id: h.id,
+      role: h.role,
+      createdAt: h.createdAt,
+      parts: parts.length > 0 ? parts : [{ type: "text", content: "" }],
+    };
+  }).reverse(); // Reverse because it was desc in DB
+
   const [input, setInput] = useState("");
   const [isImageMode, setIsImageMode] = useState(false);
   const [imageGenerating, setImageGenerating] = useState(false);
   const [localMessages, setLocalMessages] = useState<any[]>([]);
-  const [conversationId] = useState(() => "conv-" + Date.now() + "-" + Math.random().toString(36).substring(2, 9));
+  const [historyCleared, setHistoryCleared] = useState(false);
+  const [conversationId, setConversationId] = useState(() => "conv-" + Date.now() + "-" + Math.random().toString(36).substring(2, 9));
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const { messages, sendMessage, isLoading: isChatLoading } = useChat({
@@ -16,12 +95,111 @@ const AiChat = () => {
     body: { conversationId },
   });
 
-  // Combine remote messages with local image messages
-  const allMessages = [...messages, ...localMessages].sort((a, b) => {
+  // Normalize a raw message (from useChat or history) into our {id, role, createdAt, parts} format
+  const normalizeMessage = (m: any) => {
+    // If already normalized (has our custom parts with type=thinking/text/image with content field), use directly
+    if (m.parts && Array.isArray(m.parts) && m.parts.length > 0 && m.parts[0].content !== undefined) {
+      return m;
+    }
+
+    // Debug: log TanStack message structure (remove after debugging)
+    if (m.role === "assistant") {
+      console.log("[normalizeMessage] TanStack msg keys:", Object.keys(m));
+      if (m.parts) console.log("[normalizeMessage] parts sample:", JSON.stringify(m.parts.slice(0, 3)));
+      if (m.content) console.log("[normalizeMessage] content type:", typeof m.content, typeof m.content === "string" ? m.content.substring(0, 50) : JSON.stringify(m.content)?.substring(0, 50));
+    }
+
+    // TanStack AI live message — parts array with {type, text} format
+    if (m.parts && Array.isArray(m.parts) && m.parts.length > 0) {
+      const normalized: any[] = [];
+      let thinkingText = "";
+      let textContent = "";
+      for (const p of m.parts) {
+        const pType = String(p.type || "");
+        // TanStack parts use 'text' property, not 'content'
+        const pText = p.text ?? p.content ?? "";
+        const isReasoning = pType === "reasoning" || pType === "thinking" || pType.toLowerCase().includes("reason");
+        const isText = pType === "text" || pType === "text-delta";
+        
+        if (isReasoning && pText) {
+          thinkingText += pText;
+        } else if (isText && pText) {
+          textContent += pText;
+        }
+      }
+      
+      // Only use this path if we found reasoning - otherwise fall through to content string
+      if (thinkingText) {
+        if (thinkingText) normalized.push({ type: "thinking", content: thinkingText });
+        if (textContent) normalized.push({ type: "text", content: textContent });
+        return { id: m.id, role: m.role, createdAt: m.createdAt || new Date().toISOString(), parts: normalized };
+      }
+      
+      // Parts exist but no reasoning found — only use text parts
+      if (textContent) {
+        return { id: m.id, role: m.role, createdAt: m.createdAt || new Date().toISOString(), parts: [{ type: "text", content: textContent }] };
+      }
+    }
+
+    // Fallback: extract full string content
+    let text = "";
+    if (m.content && typeof m.content === "string") {
+      text = m.content;
+    } else if (Array.isArray(m.content)) {
+      // Only take text-type parts, ignore reasoning parts
+      text = m.content
+        .filter((p: any) => {
+          const t = String(p.type || "");
+          return t === "text" || t === "text-delta" || !t;
+        })
+        .map((p: any) => p.text || p.content || "")
+        .join("");
+    }
+
+    return {
+      id: m.id,
+      role: m.role,
+      createdAt: m.createdAt || new Date().toISOString(),
+      parts: parseContent(text),
+    };
+  };
+
+  // Combine history, remote messages, and local image messages
+  // Deduplicate: only show initialHistory messages that predate TanStack's live messages
+  // TanStack replays the full thread in its own `messages`, so we only need history for context older than that
+  const oldestLiveTime = messages.length > 0
+    ? Math.min(...messages.map((m: any) => new Date(m.createdAt || Date.now()).getTime()))
+    : Infinity;
+
+  const filteredHistory = messages.length > 0
+    ? initialHistory.filter((h: any) => new Date(h.createdAt || 0).getTime() < oldestLiveTime)
+    : initialHistory;
+
+  const displayHistory = historyCleared ? [] : filteredHistory;
+
+  const allMessages = [
+    ...displayHistory,
+    ...messages.map(normalizeMessage),
+    ...localMessages,
+  ].sort((a, b) => {
     const timeA = new Date(a.createdAt || Date.now()).getTime();
     const timeB = new Date(b.createdAt || Date.now()).getTime();
     return timeA - timeB;
   });
+
+  const formatDateLabel = (dateStr: string) => {
+    const d = new Date(dateStr);
+    const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
+    if (d.toDateString() === today.toDateString()) return "Hari Ini";
+    if (d.toDateString() === yesterday.toDateString()) return "Kemarin";
+    return d.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+  };
+
+  const formatTime = (dateStr: string) => {
+    return new Date(dateStr).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+  };
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -88,17 +266,80 @@ const AiChat = () => {
     setInput("");
   };
 
+  const handleClearHistory = async () => {
+    if (!confirm("Apakah Anda yakin ingin menghapus seluruh riwayat chat? Tindakan ini tidak dapat dibatalkan.")) {
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/ai/history", { method: "DELETE" });
+      if (res.ok) {
+        setHistoryCleared(true);
+        setLocalMessages([]);
+        // Force new conversation ID to clear TanStack's current session messages
+        setConversationId("conv-" + Date.now() + "-" + Math.random().toString(36).substring(2, 9));
+      } else {
+        alert("Gagal menghapus riwayat.");
+      }
+    } catch (err) {
+      console.error("Error clearing history:", err);
+      alert("Terjadi kesalahan saat menghapus riwayat.");
+    }
+  };
+
   const isLoading = isChatLoading || imageGenerating;
 
   return (
     <div style={styles.container}>
       {/* Header with Mode Toggle */}
-      <div style={styles.header}>
-        <div style={styles.headerLeft}>
-          <div style={styles.statusDot} />
-          <span style={styles.headerTitle}>AI Assistant</span>
+      <style>{`
+        @keyframes dotPulse {
+          0%, 100% { opacity: 0.4; transform: scale(0.8); }
+          50% { opacity: 1; transform: scale(1.1); }
+        }
+        @media (max-width: 640px) {
+          #ai-chat-header {
+            flex-direction: column !important;
+            gap: 12px !important;
+            padding: 12px !important;
+          }
+          #ai-chat-header-main {
+            width: 100% !important;
+            position: static !important;
+          }
+          #ai-chat-mode-tabs {
+            width: 100% !important;
+          }
+          #ai-chat-mode-tabs button {
+            flex: 1 !important;
+          }
+        }
+      `}</style>
+      <div id="ai-chat-header" style={styles.header}>
+        {/* Row for Title and Delete Button on Mobile */}
+        <div id="ai-chat-header-main" style={styles.headerMainRow}>
+          <div id="ai-chat-header-top" style={styles.headerLeft}>
+            <div style={styles.statusDot} />
+            <span style={styles.headerTitle}>AI Assistant</span>
+          </div>
+          
+          <div id="ai-chat-delete-container" style={styles.headerRight}>
+            <button
+              onClick={handleClearHistory}
+              style={{
+                ...styles.modeBtn,
+                color: "#ef4444",
+                background: "rgba(239, 68, 68, 0.05)",
+                border: "1px solid rgba(239, 68, 68, 0.2)",
+              }}
+              title="Hapus Semua Riwayat"
+            >
+              <i className="fa-solid fa-trash-can" />
+            </button>
+          </div>
         </div>
-        <div style={styles.modeTabs}>
+
+        <div id="ai-chat-mode-tabs" style={styles.modeTabs}>
           <button
             onClick={() => setIsImageMode(false)}
             style={{
@@ -139,65 +380,86 @@ const AiChat = () => {
             </div>
           </div>
         )}
-        {allMessages.map((message) => {
+        {allMessages.map((message, index) => {
           const isAssistant = message.role === "assistant";
+          const prevMessage = allMessages[index - 1];
+          const currentDate = new Date(message.createdAt || Date.now()).toDateString();
+          const prevDate = prevMessage ? new Date(prevMessage.createdAt || Date.now()).toDateString() : null;
+          const showDateSeparator = currentDate !== prevDate;
+
           return (
-            <div
-              key={message.id}
-              style={{
-                ...styles.messageRow,
-                justifyContent: isAssistant ? "flex-start" : "flex-end",
-              }}
-            >
-              {isAssistant && (
-                <div style={styles.botAvatar}>
-                  <i className="fa-solid fa-robot" style={{ fontSize: "12px" }} />
+            <React.Fragment key={message.id}>
+              {showDateSeparator && (
+                <div style={styles.dateSeparator}>
+                  <div style={styles.dateSeparatorInner}>{formatDateLabel(message.createdAt || new Date().toISOString())}</div>
                 </div>
               )}
               <div
                 style={{
-                  ...styles.messageBubble,
-                  ...(isAssistant ? styles.assistantBubble : styles.userBubble),
+                  ...styles.messageRow,
+                  justifyContent: isAssistant ? "flex-start" : "flex-end",
                 }}
               >
-                {message.parts.map((part: any, idx: number) => {
-                  if (part.type === "thinking") {
-                    return (
-                      <div key={idx} style={styles.thinking}>
-                        <i className="fa-solid fa-brain" style={{ marginRight: "6px" }} />
-                        {part.content}
-                      </div>
-                    );
-                  }
-                  if (part.type === "text") {
-                    return (
-                      <div
-                        key={idx}
-                        style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
-                      >
-                        {part.content}
-                      </div>
-                    );
-                  }
-                  if (part.type === "image") {
-                    return (
-                      <div key={idx} style={styles.imageContainer}>
-                        <img src={part.url} style={styles.image} alt="Generated" />
-                        <a 
-                          href={part.url} 
-                          download="generated-image.png" 
-                          style={styles.downloadBtn}
-                          title="Download Image"
-                        >
-                          <i className="fa-solid fa-download" />
-                        </a>
-                      </div>
-                    );
-                  }
-                  return null;
-                })}
+                {isAssistant && (
+                  <div style={styles.botAvatar}>
+                    <i className="fa-solid fa-robot" style={{ fontSize: "12px" }} />
+                  </div>
+                )}
+                <div
+                  style={{
+                    ...styles.messageBubble,
+                    ...(isAssistant ? styles.assistantBubble : styles.userBubble),
+                  }}
+                >
+                  <div style={styles.bubbleContent}>
+                    {message.parts.map((part: any, idx: number) => {
+                      if (part.type === "thinking") {
+                        const isStreaming = index === allMessages.length - 1 && isChatLoading;
+                        return (
+                          <ThinkingBlock 
+                            key={idx} 
+                            content={part.content} 
+                            isStreaming={isStreaming} 
+                          />
+                        );
+                      }
+                      if (part.type === "text") {
+                        return (
+                          <div
+                            key={idx}
+                            style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+                          >
+                            {part.content}
+                          </div>
+                        );
+                      }
+                      if (part.type === "image") {
+                        return (
+                          <div key={idx} style={styles.imageContainer}>
+                            <img src={part.url} style={styles.image} alt="Generated" />
+                            <a 
+                              href={part.url} 
+                              download="generated-image.png" 
+                              style={styles.downloadBtn}
+                              title="Download Image"
+                            >
+                              <i className="fa-solid fa-download" />
+                            </a>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })}
+                  </div>
+                  <div style={{
+                    ...styles.messageTime,
+                    color: isAssistant ? "#94a3b8" : "rgba(255,255,255,0.7)"
+                  }}>
+                    {formatTime(message.createdAt || new Date().toISOString())}
+                  </div>
+                </div>
               </div>
-            </div>
+            </React.Fragment>
           );
         })}
         {isLoading && (
@@ -267,18 +529,35 @@ const styles: Record<string, React.CSSProperties> = {
     position: "relative",
   },
   header: {
-    padding: "16px 24px",
+    padding: "10px 24px",
     background: "#fff",
     borderBottom: "1px solid rgba(226, 232, 240, 0.8)",
     display: "flex",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "center",
     zIndex: 10,
+    position: "relative",
+    minHeight: "60px",
+  },
+  headerMainRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    position: "absolute",
+    left: 0,
+    right: 0,
+    padding: "0 24px",
+    pointerEvents: "none",
   },
   headerLeft: {
     display: "flex",
     alignItems: "center",
     gap: "10px",
+    pointerEvents: "auto",
+  },
+  headerRight: {
+    pointerEvents: "auto",
   },
   statusDot: {
     width: "8px",
@@ -379,12 +658,39 @@ const styles: Record<string, React.CSSProperties> = {
   },
   messageBubble: {
     maxWidth: "80%",
-    padding: "12px 18px",
+    padding: "8px 12px 6px 14px",
     borderRadius: "18px",
-    fontSize: "14px",
-    lineHeight: "1.6",
+    fontSize: "14.5px",
+    lineHeight: "1.5",
     position: "relative",
-    transition: "all 0.3s ease",
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+  },
+  bubbleContent: {
+    flex: 1,
+  },
+  messageTime: {
+    fontSize: "10.5px",
+    alignSelf: "flex-end",
+    marginTop: "2px",
+    fontWeight: 500,
+  },
+  dateSeparator: {
+    display: "flex",
+    justifyContent: "center",
+    margin: "12px 0 20px 0",
+  },
+  dateSeparatorInner: {
+    background: "#e1f3fb",
+    padding: "5px 16px",
+    borderRadius: "10px",
+    fontSize: "11.5px",
+    fontWeight: 700,
+    color: "#54656f",
+    boxShadow: "0 1px 1px rgba(0,0,0,0.05)",
+    textTransform: "uppercase",
+    letterSpacing: "0.02em",
   },
   userBubble: {
     background: "linear-gradient(135deg, #3b82f6, #2563eb)",
@@ -399,17 +705,33 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #e2e8f0",
     boxShadow: "0 4px 15px rgba(0,0,0,0.03)",
   },
-  thinking: {
-    fontSize: "12px",
-    color: "#64748b",
+  thinkingContainer: {
+    marginBottom: "12px",
+    borderRadius: "10px",
+    overflow: "hidden",
+    border: "1px solid rgba(226, 232, 240, 0.8)",
+    background: "#f8fafc",
+  },
+  thinkingHeader: {
+    padding: "6px 12px",
     display: "flex",
     alignItems: "center",
-    marginBottom: "8px",
-    fontWeight: 500,
-    padding: "4px 8px",
+    fontSize: "11px",
+    fontWeight: 600,
+    color: "#64748b",
+    cursor: "pointer",
+    userSelect: "none",
     background: "#f1f5f9",
-    borderRadius: "6px",
-    width: "fit-content",
+    transition: "all 0.2s ease",
+  },
+  thinkingContent: {
+    padding: "10px 12px",
+    fontSize: "12px",
+    color: "#475569",
+    lineHeight: "1.5",
+    whiteSpace: "pre-wrap",
+    borderTop: "1px solid rgba(226, 232, 240, 0.5)",
+    background: "#fff",
   },
   imageContainer: {
     position: "relative",

@@ -39,8 +39,53 @@ const baseCss = `
     background: #f8fafc;
     border-right: 1px solid rgba(199,196,216,0.35);
     display: none;
+    z-index: 100;
   }
-  @media (min-width: 1024px) { .sidebar { display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; } }
+  @media (min-width: 1024px) { 
+    .sidebar { display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; } 
+  }
+  @media (max-width: 1023px) {
+    .sidebar.show {
+      display: flex;
+      flex-direction: column;
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 100vh;
+      background: #fff;
+      box-shadow: 20px 0 50px rgba(15,23,42,0.15);
+      animation: sideIn 0.3s ease-out;
+    }
+    @keyframes sideIn {
+      from { transform: translateX(-100%); }
+      to { transform: translateX(0); }
+    }
+  }
+  .sidebarOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(2px);
+    z-index: 90;
+    display: none;
+  }
+  .sidebarOverlay.show { display: block; }
+  .menuToggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    border: 1px solid rgba(199,196,216,0.45);
+    background: #fff;
+    cursor: pointer;
+    margin-right: 12px;
+    color: #3525cd;
+  }
+  @media (min-width: 1024px) {
+    .menuToggle { display: none; }
+  }
   .brand { display:flex; align-items:center; gap: 12px; padding: 12px 8px; margin-bottom: 10px; }
   .brandIcon {
     width: 40px; height: 40px; border-radius: 14px;
@@ -189,7 +234,43 @@ const baseCss = `
   }
   .statLabel { font-size: 10px; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; color: rgba(70,69,85,0.55); }
   .statValue { margin-top: 10px; font-size: 28px; font-weight: 800; letter-spacing: -0.03em; }
-  .table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .statusBadge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: capitalize;
+  }
+  .statusBadge.active {
+    background: rgba(34,197,94,0.12);
+    color: #166534;
+    border: 1px solid rgba(34,197,94,0.25);
+  }
+  .statusBadge.inactive {
+    background: rgba(100,116,139,0.1);
+    color: #475569;
+    border: 1px solid rgba(100,116,139,0.2);
+  }
+  .webhookBadge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 8px;
+    background: rgba(53,37,205,0.05);
+    color: #3525cd;
+    border: 1px solid rgba(53,37,205,0.15);
+    font-size: 12px;
+    font-weight: 600;
+    max-width: 200px;
+  }
+  .webhookBadge i { font-size: 10px; opacity: 0.8; }
+  .webhookBadge span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tableResponsive { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .table { width: 100%; border-collapse: collapse; margin-top: 8px; min-width: 600px; }
   .table th {
     text-align: left;
     font-size: 11px;
@@ -529,7 +610,8 @@ export const AdminLayout: FC<{
     </head>
     <body style='font-family: "Poppins", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;'>
       <div class="app">
-        <aside class="sidebar">
+        <div class="sidebarOverlay" id="sidebarOverlay"></div>
+        <aside class="sidebar" id="sidebar">
           <div class="brand">
             <div class={`brandIcon${props.logoUrl ? " hasLogo" : ""}`}>
               {props.logoUrl ? (
@@ -619,7 +701,12 @@ export const AdminLayout: FC<{
 
         <div class="content">
           <header class="topbar">
-            <div class="topTitle">{props.appName}</div>
+            <div style="display: flex; align-items: center;">
+              <button class="menuToggle" id="menuToggle" type="button">
+                <i class="fa-solid fa-bars"></i>
+              </button>
+              <div class="topTitle">{props.appName}</div>
+            </div>
             <div class="topRight">
               <div class="accountMenuWrap">
                 <button class="accountBtn" type="button" id="accountBtn">
@@ -722,6 +809,35 @@ export const AdminLayout: FC<{
 
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") closeMenu();
+    });
+  }
+
+  const menuToggle = document.getElementById("menuToggle");
+  const sidebar = document.getElementById("sidebar");
+  const overlay = document.getElementById("sidebarOverlay");
+  
+  if (menuToggle && sidebar && overlay) {
+    const toggleSidebar = () => {
+      sidebar.classList.toggle("show");
+      overlay.classList.toggle("show");
+    };
+    const closeSidebar = () => {
+      sidebar.classList.remove("show");
+      overlay.classList.remove("show");
+    };
+    
+    menuToggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleSidebar();
+    });
+    
+    overlay.addEventListener("click", closeSidebar);
+    
+    // Close on nav click if mobile
+    sidebar.addEventListener("click", (e) => {
+      if (e.target.closest(".navItem")) {
+        closeSidebar();
+      }
     });
   }
 

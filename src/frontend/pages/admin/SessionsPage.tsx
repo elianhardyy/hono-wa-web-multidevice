@@ -87,81 +87,77 @@ export const SessionsPage: FC<
         {props.isLoading ? (
           <div style="margin-top: 12px;"><Skeleton height={300} /></div>
         ) : (
-        <table class="table">
-          <thead>
-            <tr>
-              <th>Session ID</th>
-              <th>Webhook</th>
-              <th>Runtime</th>
-              <th>Dibuat</th>
-              <th>Aksi</th>
-            </tr>
-          </thead>
-          <tbody>
-            {props.waSessions.map((s) => (
+        <div class="tableResponsive">
+          <table class="table">
+            <thead>
               <tr>
-                <td>{s.sessionId}</td>
-                <td class="muted">
-                  <div style="max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                    {s.webhookUrl ? s.webhookUrl : "(default)"}
-                  </div>
-                </td>
-                <td class="muted">
-                  {props.runtimeSessionIds.includes(s.sessionId)
-                    ? "active"
-                    : "inactive"}
-                </td>
-                <td class="muted">{new Date(s.createdAt).toLocaleString()}</td>
-                <td>
-                  <div class="btnRow">
-                    <button
-                      class="btn js-open-qr"
-                      type="button"
-                      data-session-id={s.sessionId}
-                    >
-                      Scan QR
-                    </button>
-                    <button
-                      class="btn js-open-webhook"
-                      type="button"
-                      data-session-id={s.sessionId}
-                      data-webhook-url={s.webhookUrl ?? ""}
-                    >
-                      Webhook
-                    </button>
-                    <a
-                      class="btn"
-                      href={`/admin/message?sessionId=${encodeURIComponent(s.sessionId)}`}
-                    >
-                      Message
-                    </a>
-                    <a
-                      class="btn"
-                      href={`/admin/broadcast?sessionId=${encodeURIComponent(s.sessionId)}`}
-                    >
-                      Broadcast
-                    </a>
-                    <a
-                      class="btn"
-                      href={`/admin/status?sessionId=${encodeURIComponent(s.sessionId)}`}
-                    >
-                      Status
-                    </a>
-                    <form
-                      method="post"
-                      action={`/admin/sessions/${encodeURIComponent(s.sessionId)}/delete`}
-                      onsubmit="return confirm('Hapus session ini? Ini akan logout device, stop runtime, dan menghapus record session.');"
-                    >
-                      <button class="btn danger" type="submit">
-                        Hapus
-                      </button>
-                    </form>
-                  </div>
-                </td>
+                <th>Session ID</th>
+                <th>Webhook</th>
+                <th>Runtime</th>
+                <th>Dibuat</th>
+                <th>Aksi</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {props.waSessions.map((s) => (
+                <tr>
+                  <td>{s.sessionId}</td>
+                  <td>
+                    <div class="webhookBadge">
+                      <i class="fa-solid fa-globe"></i>
+                      <span>{s.webhookUrl ? s.webhookUrl : "(default)"}</span>
+                    </div>
+                  </td>
+                  <td>
+                    {props.runtimeSessionIds.includes(s.sessionId) ? (
+                      <span class="statusBadge active">
+                        <i class="fa-solid fa-circle-play"></i>
+                        Active
+                      </span>
+                    ) : (
+                      <span class="statusBadge inactive">
+                        <i class="fa-solid fa-circle-stop"></i>
+                        Inactive
+                      </span>
+                    )}
+                  </td>
+                  <td class="muted">{new Date(s.createdAt).toLocaleString()}</td>
+                  <td>
+                    <div class="btnRow">
+                      <button
+                        class="btn success js-open-qr"
+                        type="button"
+                        data-session-id={s.sessionId}
+                      >
+                        <i class="fa-solid fa-qrcode" style="margin-right: 6px;"></i>
+                        Scan QR
+                      </button>
+                      <button
+                        class="btn primary js-open-webhook"
+                        type="button"
+                        data-session-id={s.sessionId}
+                        data-webhook-url={s.webhookUrl ?? ""}
+                      >
+                        <i class="fa-solid fa-link" style="margin-right: 6px;"></i>
+                        Webhook
+                      </button>
+                      <form
+                        method="post"
+                        action={`/admin/sessions/${encodeURIComponent(s.sessionId)}/delete`}
+                        onsubmit="return confirm('Hapus session ini? Ini akan logout device, stop runtime, dan menghapus record session.');"
+                      >
+                        <button class="btn danger" type="submit">
+                          <i class="fa-solid fa-trash" style="margin-right: 6px;"></i>
+                          Hapus
+                        </button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         )}
       </div>
     </div>

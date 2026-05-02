@@ -145,94 +145,99 @@ export const StatusPage: FC<
             </a>
           </div>
         </form>
-        <table class="table" style="margin-top: 12px;">
-          <thead>
-            <tr>
-              <th>Pilih</th>
-              <th>Waktu</th>
-              <th>Session</th>
-              <th>Media URL</th>
-              <th>Text</th>
-              <th>Status</th>
-              <th>Aksi</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(props.history ?? []).map((h) => (
+        <div class="tableResponsive" style="margin-top: 12px;">
+          <table class="table">
+            <thead>
               <tr>
-                <td class="muted">
-                  <input
-                    type="checkbox"
-                    name="selectedIds"
-                    value={h.id}
-                    form="history-status-bulk-form"
-                  />
-                </td>
-                <td class="muted">{new Date(h.createdAt).toLocaleString()}</td>
-                <td>{h.sessionId}</td>
-                <td class="muted">
-                  <div style="max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                    {String(h.payload?.mediaUrl ?? "-")}
-                  </div>
-                </td>
-                <td class="muted">
-                  <div style="max-width:360px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                    {String(h.payload?.text ?? "-")}
-                  </div>
-                </td>
-                <td class="muted">
-                  {h.success
-                    ? "sent"
-                    : `failed${h.error ? `: ${h.error}` : ""}`}
-                </td>
-                <td>
-                  <div class="btnRow">
-                    <form method="post" action="/admin/history/resend">
-                      <input type="hidden" name="actionType" value="status" />
-                      <input
-                        type="hidden"
-                        name="sessionId"
-                        value={props.selectedSessionId ?? ""}
-                      />
-                      <input type="hidden" name="actionLogId" value={h.id} />
-                      <button class="btn success" type="submit">
-                        Resend
-                      </button>
-                    </form>
-                    <form method="post" action="/admin/history/unsend">
-                      <input type="hidden" name="actionType" value="status" />
-                      <input
-                        type="hidden"
-                        name="sessionId"
-                        value={props.selectedSessionId ?? ""}
-                      />
-                      <input type="hidden" name="actionLogId" value={h.id} />
-                      <button
-                        class="btn warning"
-                        type="submit"
-                        disabled={!canUnsend(h)}
-                      >
-                        Unsend
-                      </button>
-                    </form>
-                    <form method="post" action="/admin/history/delete">
-                      <input type="hidden" name="actionType" value="status" />
-                      <input
-                        type="hidden"
-                        name="sessionId"
-                        value={props.selectedSessionId ?? ""}
-                      />
-                      <input type="hidden" name="actionLogId" value={h.id} />
-                      <button class="btn danger" type="submit">
-                        Delete
-                      </button>
-                    </form>
-                  </div>
-                </td>
+                <th>Pilih</th>
+                <th>Waktu</th>
+                <th>Session</th>
+                <th>Media URL</th>
+                <th>Text</th>
+                <th>Status</th>
+                <th>Aksi</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {(props.history ?? []).map((h) => (
+                <tr>
+                  <td class="muted">
+                    <input
+                      type="checkbox"
+                      name="selectedIds"
+                      value={h.id}
+                      form="history-status-bulk-form"
+                    />
+                  </td>
+                  <td class="muted">{new Date(h.createdAt).toLocaleString()}</td>
+                  <td>{h.sessionId}</td>
+                  <td class="muted">
+                    <div style="max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                      {String(h.payload?.mediaUrl ?? "-")}
+                    </div>
+                  </td>
+                  <td class="muted">
+                    <div style="max-width:360px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                      {String(h.payload?.text ?? "-")}
+                    </div>
+                  </td>
+                  <td class="muted">
+                    {h.success
+                      ? "sent"
+                      : `failed${h.error ? `: ${h.error}` : ""}`}
+                  </td>
+                  <td>
+                    <div class="btnRow">
+                      <form method="post" action="/admin/history/resend">
+                        <input type="hidden" name="actionType" value="status" />
+                        <input
+                          type="hidden"
+                          name="sessionId"
+                          value={props.selectedSessionId ?? ""}
+                        />
+                        <input type="hidden" name="actionLogId" value={h.id} />
+                        <button class="btn success" type="submit">
+                          <i class="fa-solid fa-rotate-right" style="margin-right: 6px;"></i>
+                          Resend
+                        </button>
+                      </form>
+                      <form method="post" action="/admin/history/unsend">
+                        <input type="hidden" name="actionType" value="status" />
+                        <input
+                          type="hidden"
+                          name="sessionId"
+                          value={props.selectedSessionId ?? ""}
+                        />
+                        <input type="hidden" name="actionLogId" value={h.id} />
+                        <button
+                          class="btn warning"
+                          type="submit"
+                          disabled={!canUnsend(h)}
+                        >
+                          <i class="fa-solid fa-undo" style="margin-right: 6px;"></i>
+                          Unsend
+                        </button>
+                      </form>
+                      <form method="post" action="/admin/history/delete">
+                        <input type="hidden" name="actionType" value="status" />
+                        <input
+                          type="hidden"
+                          name="sessionId"
+                          value={props.selectedSessionId ?? ""}
+                        />
+                        <input type="hidden" name="actionLogId" value={h.id} />
+                        <button class="btn danger" type="submit">
+                          <i class="fa-solid fa-trash" style="margin-right: 6px;"></i>
+                          Delete
+                        </button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         </>
         )}
       </div>

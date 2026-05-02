@@ -29510,22 +29510,151 @@ var import_react4 = __toESM(require_react(), 1);
 
 // src/frontend/client/ai-chat.tsx
 var import_jsx_runtime = __toESM(require_jsx_runtime(), 1);
+var ThinkingBlock = ({ content, isStreaming }) => {
+  const [isOpen, setIsOpen] = (0, import_react5.useState)(isStreaming);
+  (0, import_react5.useEffect)(() => {
+    setIsOpen(!!isStreaming);
+  }, [isStreaming]);
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.thinkingContainer, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+      "div",
+      {
+        onClick: () => setIsOpen(!isOpen),
+        style: styles.thinkingHeader,
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: "fa-solid fa-brain", style: { marginRight: "6px", fontSize: "11px" } }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { flex: 1 }, children: isStreaming ? "Thinking..." : "Thinking Process" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: `fa-solid fa-chevron-${isOpen ? "up" : "down"}`, style: { fontSize: "10px", opacity: 0.7 } })
+        ]
+      }
+    ),
+    isOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: styles.thinkingContent, children: content })
+  ] });
+};
 var AiChat = () => {
+  const parseContent = (content) => {
+    if (content.startsWith("[IMAGE]")) {
+      return [{ type: "image", url: content.replace("[IMAGE]", "") }];
+    }
+    const lastThinkingEnd = content.lastIndexOf("</thinking>");
+    if (lastThinkingEnd === -1) {
+      return [{ type: "text", content }];
+    }
+    const thinkingArea = content.substring(0, lastThinkingEnd + "</thinking>".length);
+    const answerText = content.substring(lastThinkingEnd + "</thinking>".length).trim();
+    const thinkingRegex = /<thinking>([\s\S]*?)<\/thinking>/g;
+    let thinkingContent = "";
+    let match;
+    while ((match = thinkingRegex.exec(thinkingArea)) !== null) {
+      thinkingContent += match[1];
+    }
+    const parts = [];
+    if (thinkingContent) parts.push({ type: "thinking", content: thinkingContent });
+    if (answerText) parts.push({ type: "text", content: answerText });
+    if (parts.length === 0) parts.push({ type: "text", content });
+    return parts;
+  };
+  const rootEl = document.getElementById("ai-chat-root");
+  const initialHistory = JSON.parse(rootEl?.dataset.history || "[]").map((h) => {
+    const parts = [];
+    if (h.reasoning) {
+      parts.push({ type: "thinking", content: h.reasoning });
+    }
+    if (h.content) {
+      const contentParts = parseContent(h.content);
+      parts.push(...contentParts);
+    }
+    return {
+      id: h.id,
+      role: h.role,
+      createdAt: h.createdAt,
+      parts: parts.length > 0 ? parts : [{ type: "text", content: "" }]
+    };
+  }).reverse();
   const [input, setInput] = (0, import_react5.useState)("");
   const [isImageMode, setIsImageMode] = (0, import_react5.useState)(false);
   const [imageGenerating, setImageGenerating] = (0, import_react5.useState)(false);
   const [localMessages, setLocalMessages] = (0, import_react5.useState)([]);
-  const [conversationId] = (0, import_react5.useState)(() => "conv-" + Date.now() + "-" + Math.random().toString(36).substring(2, 9));
+  const [historyCleared, setHistoryCleared] = (0, import_react5.useState)(false);
+  const [conversationId, setConversationId] = (0, import_react5.useState)(() => "conv-" + Date.now() + "-" + Math.random().toString(36).substring(2, 9));
   const scrollRef = (0, import_react5.useRef)(null);
   const { messages, sendMessage, isLoading: isChatLoading } = useChat({
     connection: fetchServerSentEvents("/api/ai/chat"),
     body: { conversationId }
   });
-  const allMessages = [...messages, ...localMessages].sort((a, b) => {
+  const normalizeMessage = (m) => {
+    if (m.parts && Array.isArray(m.parts) && m.parts.length > 0 && m.parts[0].content !== void 0) {
+      return m;
+    }
+    if (m.role === "assistant") {
+      console.log("[normalizeMessage] TanStack msg keys:", Object.keys(m));
+      if (m.parts) console.log("[normalizeMessage] parts sample:", JSON.stringify(m.parts.slice(0, 3)));
+      if (m.content) console.log("[normalizeMessage] content type:", typeof m.content, typeof m.content === "string" ? m.content.substring(0, 50) : JSON.stringify(m.content)?.substring(0, 50));
+    }
+    if (m.parts && Array.isArray(m.parts) && m.parts.length > 0) {
+      const normalized = [];
+      let thinkingText = "";
+      let textContent = "";
+      for (const p of m.parts) {
+        const pType = String(p.type || "");
+        const pText = p.text ?? p.content ?? "";
+        const isReasoning = pType === "reasoning" || pType === "thinking" || pType.toLowerCase().includes("reason");
+        const isText = pType === "text" || pType === "text-delta";
+        if (isReasoning && pText) {
+          thinkingText += pText;
+        } else if (isText && pText) {
+          textContent += pText;
+        }
+      }
+      if (thinkingText) {
+        if (thinkingText) normalized.push({ type: "thinking", content: thinkingText });
+        if (textContent) normalized.push({ type: "text", content: textContent });
+        return { id: m.id, role: m.role, createdAt: m.createdAt || (/* @__PURE__ */ new Date()).toISOString(), parts: normalized };
+      }
+      if (textContent) {
+        return { id: m.id, role: m.role, createdAt: m.createdAt || (/* @__PURE__ */ new Date()).toISOString(), parts: [{ type: "text", content: textContent }] };
+      }
+    }
+    let text = "";
+    if (m.content && typeof m.content === "string") {
+      text = m.content;
+    } else if (Array.isArray(m.content)) {
+      text = m.content.filter((p) => {
+        const t = String(p.type || "");
+        return t === "text" || t === "text-delta" || !t;
+      }).map((p) => p.text || p.content || "").join("");
+    }
+    return {
+      id: m.id,
+      role: m.role,
+      createdAt: m.createdAt || (/* @__PURE__ */ new Date()).toISOString(),
+      parts: parseContent(text)
+    };
+  };
+  const oldestLiveTime = messages.length > 0 ? Math.min(...messages.map((m) => new Date(m.createdAt || Date.now()).getTime())) : Infinity;
+  const filteredHistory = messages.length > 0 ? initialHistory.filter((h) => new Date(h.createdAt || 0).getTime() < oldestLiveTime) : initialHistory;
+  const displayHistory = historyCleared ? [] : filteredHistory;
+  const allMessages = [
+    ...displayHistory,
+    ...messages.map(normalizeMessage),
+    ...localMessages
+  ].sort((a, b) => {
     const timeA = new Date(a.createdAt || Date.now()).getTime();
     const timeB = new Date(b.createdAt || Date.now()).getTime();
     return timeA - timeB;
   });
+  const formatDateLabel = (dateStr) => {
+    const d = new Date(dateStr);
+    const today = /* @__PURE__ */ new Date();
+    const yesterday = /* @__PURE__ */ new Date();
+    yesterday.setDate(today.getDate() - 1);
+    if (d.toDateString() === today.toDateString()) return "Hari Ini";
+    if (d.toDateString() === yesterday.toDateString()) return "Kemarin";
+    return d.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+  };
+  const formatTime = (dateStr) => {
+    return new Date(dateStr).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+  };
   (0, import_react5.useEffect)(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -29583,14 +29712,71 @@ var AiChat = () => {
     }
     setInput("");
   };
+  const handleClearHistory = async () => {
+    if (!confirm("Apakah Anda yakin ingin menghapus seluruh riwayat chat? Tindakan ini tidak dapat dibatalkan.")) {
+      return;
+    }
+    try {
+      const res = await fetch("/api/ai/history", { method: "DELETE" });
+      if (res.ok) {
+        setHistoryCleared(true);
+        setLocalMessages([]);
+        setConversationId("conv-" + Date.now() + "-" + Math.random().toString(36).substring(2, 9));
+      } else {
+        alert("Gagal menghapus riwayat.");
+      }
+    } catch (err) {
+      console.error("Error clearing history:", err);
+      alert("Terjadi kesalahan saat menghapus riwayat.");
+    }
+  };
   const isLoading = isChatLoading || imageGenerating;
   return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.container, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.header, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.headerLeft, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: styles.statusDot }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.headerTitle, children: "AI Assistant" })
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("style", { children: `
+        @keyframes dotPulse {
+          0%, 100% { opacity: 0.4; transform: scale(0.8); }
+          50% { opacity: 1; transform: scale(1.1); }
+        }
+        @media (max-width: 640px) {
+          #ai-chat-header {
+            flex-direction: column !important;
+            gap: 12px !important;
+            padding: 12px !important;
+          }
+          #ai-chat-header-main {
+            width: 100% !important;
+            position: static !important;
+          }
+          #ai-chat-mode-tabs {
+            width: 100% !important;
+          }
+          #ai-chat-mode-tabs button {
+            flex: 1 !important;
+          }
+        }
+      ` }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { id: "ai-chat-header", style: styles.header, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { id: "ai-chat-header-main", style: styles.headerMainRow, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { id: "ai-chat-header-top", style: styles.headerLeft, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: styles.statusDot }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: styles.headerTitle, children: "AI Assistant" })
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { id: "ai-chat-delete-container", style: styles.headerRight, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+          "button",
+          {
+            onClick: handleClearHistory,
+            style: {
+              ...styles.modeBtn,
+              color: "#ef4444",
+              background: "rgba(239, 68, 68, 0.05)",
+              border: "1px solid rgba(239, 68, 68, 0.2)"
+            },
+            title: "Hapus Semua Riwayat",
+            children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: "fa-solid fa-trash-can" })
+          }
+        ) })
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.modeTabs, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { id: "ai-chat-mode-tabs", style: styles.modeTabs, children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
           "button",
           {
@@ -29627,64 +29813,81 @@ var AiChat = () => {
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: styles.emptyTitle, children: isImageMode ? "Bikin Gambar Apa Hari Ini?" : "Halo! Ada yang bisa dibantu?" }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: styles.emptySub, children: isImageMode ? "Masukkan prompt deskriptif untuk membuat gambar keren." : "Ketik pesan untuk mulai percakapan dengan AI assistant." })
       ] }),
-      allMessages.map((message) => {
+      allMessages.map((message, index) => {
         const isAssistant = message.role === "assistant";
-        return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
-          "div",
-          {
-            style: {
-              ...styles.messageRow,
-              justifyContent: isAssistant ? "flex-start" : "flex-end"
-            },
-            children: [
-              isAssistant && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: styles.botAvatar, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: "fa-solid fa-robot", style: { fontSize: "12px" } }) }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-                "div",
-                {
-                  style: {
-                    ...styles.messageBubble,
-                    ...isAssistant ? styles.assistantBubble : styles.userBubble
-                  },
-                  children: message.parts.map((part, idx) => {
-                    if (part.type === "thinking") {
-                      return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.thinking, children: [
-                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: "fa-solid fa-brain", style: { marginRight: "6px" } }),
-                        part.content
-                      ] }, idx);
-                    }
-                    if (part.type === "text") {
-                      return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-                        "div",
-                        {
-                          style: { whiteSpace: "pre-wrap", wordBreak: "break-word" },
-                          children: part.content
-                        },
-                        idx
-                      );
-                    }
-                    if (part.type === "image") {
-                      return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.imageContainer, children: [
-                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", { src: part.url, style: styles.image, alt: "Generated" }),
-                        /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-                          "a",
-                          {
-                            href: part.url,
-                            download: "generated-image.png",
-                            style: styles.downloadBtn,
-                            title: "Download Image",
-                            children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: "fa-solid fa-download" })
-                          }
-                        )
-                      ] }, idx);
-                    }
-                    return null;
-                  })
-                }
-              )
-            ]
-          },
-          message.id
-        );
+        const prevMessage = allMessages[index - 1];
+        const currentDate = new Date(message.createdAt || Date.now()).toDateString();
+        const prevDate = prevMessage ? new Date(prevMessage.createdAt || Date.now()).toDateString() : null;
+        const showDateSeparator = currentDate !== prevDate;
+        return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_react5.default.Fragment, { children: [
+          showDateSeparator && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: styles.dateSeparator, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: styles.dateSeparatorInner, children: formatDateLabel(message.createdAt || (/* @__PURE__ */ new Date()).toISOString()) }) }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+            "div",
+            {
+              style: {
+                ...styles.messageRow,
+                justifyContent: isAssistant ? "flex-start" : "flex-end"
+              },
+              children: [
+                isAssistant && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: styles.botAvatar, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: "fa-solid fa-robot", style: { fontSize: "12px" } }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+                  "div",
+                  {
+                    style: {
+                      ...styles.messageBubble,
+                      ...isAssistant ? styles.assistantBubble : styles.userBubble
+                    },
+                    children: [
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: styles.bubbleContent, children: message.parts.map((part, idx) => {
+                        if (part.type === "thinking") {
+                          const isStreaming = index === allMessages.length - 1 && isChatLoading;
+                          return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+                            ThinkingBlock,
+                            {
+                              content: part.content,
+                              isStreaming
+                            },
+                            idx
+                          );
+                        }
+                        if (part.type === "text") {
+                          return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+                            "div",
+                            {
+                              style: { whiteSpace: "pre-wrap", wordBreak: "break-word" },
+                              children: part.content
+                            },
+                            idx
+                          );
+                        }
+                        if (part.type === "image") {
+                          return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: styles.imageContainer, children: [
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", { src: part.url, style: styles.image, alt: "Generated" }),
+                            /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+                              "a",
+                              {
+                                href: part.url,
+                                download: "generated-image.png",
+                                style: styles.downloadBtn,
+                                title: "Download Image",
+                                children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: "fa-solid fa-download" })
+                              }
+                            )
+                          ] }, idx);
+                        }
+                        return null;
+                      }) }),
+                      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: {
+                        ...styles.messageTime,
+                        color: isAssistant ? "#94a3b8" : "rgba(255,255,255,0.7)"
+                      }, children: formatTime(message.createdAt || (/* @__PURE__ */ new Date()).toISOString()) })
+                    ]
+                  }
+                )
+              ]
+            }
+          )
+        ] }, message.id);
       }),
       isLoading && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { ...styles.messageRow, justifyContent: "flex-start" }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: styles.botAvatar, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("i", { className: "fa-solid fa-robot", style: { fontSize: "12px" } }) }),
@@ -29740,18 +29943,35 @@ var styles = {
     position: "relative"
   },
   header: {
-    padding: "16px 24px",
+    padding: "10px 24px",
     background: "#fff",
     borderBottom: "1px solid rgba(226, 232, 240, 0.8)",
     display: "flex",
     alignItems: "center",
+    justifyContent: "center",
+    zIndex: 10,
+    position: "relative",
+    minHeight: "60px"
+  },
+  headerMainRow: {
+    display: "flex",
+    alignItems: "center",
     justifyContent: "space-between",
-    zIndex: 10
+    width: "100%",
+    position: "absolute",
+    left: 0,
+    right: 0,
+    padding: "0 24px",
+    pointerEvents: "none"
   },
   headerLeft: {
     display: "flex",
     alignItems: "center",
-    gap: "10px"
+    gap: "10px",
+    pointerEvents: "auto"
+  },
+  headerRight: {
+    pointerEvents: "auto"
   },
   statusDot: {
     width: "8px",
@@ -29852,12 +30072,39 @@ var styles = {
   },
   messageBubble: {
     maxWidth: "80%",
-    padding: "12px 18px",
+    padding: "8px 12px 6px 14px",
     borderRadius: "18px",
-    fontSize: "14px",
-    lineHeight: "1.6",
+    fontSize: "14.5px",
+    lineHeight: "1.5",
     position: "relative",
-    transition: "all 0.3s ease"
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px"
+  },
+  bubbleContent: {
+    flex: 1
+  },
+  messageTime: {
+    fontSize: "10.5px",
+    alignSelf: "flex-end",
+    marginTop: "2px",
+    fontWeight: 500
+  },
+  dateSeparator: {
+    display: "flex",
+    justifyContent: "center",
+    margin: "12px 0 20px 0"
+  },
+  dateSeparatorInner: {
+    background: "#e1f3fb",
+    padding: "5px 16px",
+    borderRadius: "10px",
+    fontSize: "11.5px",
+    fontWeight: 700,
+    color: "#54656f",
+    boxShadow: "0 1px 1px rgba(0,0,0,0.05)",
+    textTransform: "uppercase",
+    letterSpacing: "0.02em"
   },
   userBubble: {
     background: "linear-gradient(135deg, #3b82f6, #2563eb)",
@@ -29872,17 +30119,33 @@ var styles = {
     border: "1px solid #e2e8f0",
     boxShadow: "0 4px 15px rgba(0,0,0,0.03)"
   },
-  thinking: {
-    fontSize: "12px",
-    color: "#64748b",
+  thinkingContainer: {
+    marginBottom: "12px",
+    borderRadius: "10px",
+    overflow: "hidden",
+    border: "1px solid rgba(226, 232, 240, 0.8)",
+    background: "#f8fafc"
+  },
+  thinkingHeader: {
+    padding: "6px 12px",
     display: "flex",
     alignItems: "center",
-    marginBottom: "8px",
-    fontWeight: 500,
-    padding: "4px 8px",
+    fontSize: "11px",
+    fontWeight: 600,
+    color: "#64748b",
+    cursor: "pointer",
+    userSelect: "none",
     background: "#f1f5f9",
-    borderRadius: "6px",
-    width: "fit-content"
+    transition: "all 0.2s ease"
+  },
+  thinkingContent: {
+    padding: "10px 12px",
+    fontSize: "12px",
+    color: "#475569",
+    lineHeight: "1.5",
+    whiteSpace: "pre-wrap",
+    borderTop: "1px solid rgba(226, 232, 240, 0.5)",
+    background: "#fff"
   },
   imageContainer: {
     position: "relative",

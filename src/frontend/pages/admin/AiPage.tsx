@@ -7,6 +7,7 @@ export type AiChatHistory = {
   conversationId: string;
   role: string;
   content: string;
+  reasoning: string | null;
   model: string | null;
   createdAt: Date;
 };
@@ -36,7 +37,11 @@ export const AiPage: FC<LayoutBase> = (props) => (
       subtitle="Chat cerdas dan generate gambar artistik dengan AI"
     />
     <div style="margin-top: 24px;">
-      <div id="ai-chat-root">
+      <div 
+        id="ai-chat-root" 
+        data-history={JSON.stringify(props.history || [])}
+        data-username={props.username}
+      >
         <div
           class="card"
           style="display:flex; align-items:center; justify-content:center; min-height:500px; gap:16px; flex-direction:column; border-radius: 24px; border: 1px dashed #cbd5e1; background: #f8fafc;"
@@ -48,7 +53,6 @@ export const AiPage: FC<LayoutBase> = (props) => (
         </div>
       </div>
     </div>
-    <HistoryChatPrompt history={props.history || []} />
 
     <script type="module" src="/assets/ai-chat.js" />
   </AdminLayout>

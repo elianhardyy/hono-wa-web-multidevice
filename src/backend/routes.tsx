@@ -124,7 +124,8 @@ import {
 
 import { isSessionAllowedForUser } from "./service/session.service.js";
 
-import { handleAiChat, handleAiImage, getAiChatHistory } from "./service/ai.service.js";
+import { handleAiChat, handleAiImage, getAiChatHistory, deleteAllAiChatHistory } from "./service/ai.service.js";
+
 
 router.get("/login", async (c) => {
   try {
@@ -2611,6 +2612,12 @@ router.post("/api/ai/chat", requireAuth, async (c) => {
 
 router.post("/api/ai/image", requireAuth, async (c) => {
   return handleAiImage(c);
+});
+
+router.delete("/api/ai/history", requireAuth, async (c) => {
+  const user = c.get("authUser");
+  await deleteAllAiChatHistory(user.id);
+  return c.json({ success: true, message: "History deleted" });
 });
 
 router.get("/admin/ai", requireAuth, async (c) => {

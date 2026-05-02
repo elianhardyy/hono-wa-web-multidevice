@@ -118,6 +118,7 @@ export const ensureSchema = async () => {
   await db.query(`create index if not exists ai_chats_user_id_idx on ai_chats(user_id);`);
   await db.query(`create index if not exists ai_chats_conv_id_idx on ai_chats(conversation_id);`);
   await db.query(`create index if not exists ai_chats_created_at_idx on ai_chats(created_at);`);
+  await db.query(`alter table ai_chats add column if not exists reasoning text;`);
 };
 
 export const getSetting = async (key: string): Promise<string | null> => {

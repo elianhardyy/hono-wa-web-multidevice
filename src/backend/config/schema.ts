@@ -105,6 +105,7 @@ export const aiChats = pgTable(
     conversationId: text("conversation_id").notNull(),
     role: text("role").notNull(), // 'user', 'assistant', 'system'
     content: text("content").notNull(),
+    reasoning: text("reasoning"),
     model: text("model"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
