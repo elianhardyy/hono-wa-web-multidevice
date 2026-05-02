@@ -4,7 +4,7 @@
 
 import { createRequire } from "module";
 import crypto from "crypto";
-import { SESSION_STATUS, type SessionData } from "./types.js";
+import { SESSION_STATUS, type SessionData } from "../utils/types.js";
 import {
   persistSession,
   removeSessionFromFile,
@@ -15,8 +15,8 @@ import {
   webhookSessionReady,
   webhookSessionQR,
   webhookSessionDisconnected,
-} from "./webhook.js";
-import { createActionLog } from "./auth.js";
+} from "../webhook/webhook.js";
+import { createActionLog } from "../utils/auth.js";
 
 const require = createRequire(import.meta.url);
 const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js") as {
@@ -228,7 +228,7 @@ const processBroadcastQueue = async (sessionId: string) => {
             success: false,
             error: job.error,
           });
-        } catch {}
+        } catch { }
         continue;
       }
 
@@ -302,11 +302,11 @@ const processBroadcastQueue = async (sessionId: string) => {
             message: job.message,
             media: job.media
               ? {
-                  source: job.media.source,
-                  filename: job.media.filename,
-                  mimetype: job.media.mimetype,
-                  size: job.media.size,
-                }
+                source: job.media.source,
+                filename: job.media.filename,
+                mimetype: job.media.mimetype,
+                size: job.media.size,
+              }
               : null,
             delayMs: job.delayMs,
             summary: job.summary,
@@ -315,7 +315,7 @@ const processBroadcastQueue = async (sessionId: string) => {
           success: job.status === "done",
           error: job.error ?? null,
         });
-      } catch {}
+      } catch { }
     }
   } finally {
     broadcastProcessing.delete(sessionId);
@@ -360,18 +360,18 @@ export const enqueueBroadcastJob = async (input: {
         message: job.message,
         media: job.media
           ? {
-              source: job.media.source,
-              filename: job.media.filename,
-              mimetype: job.media.mimetype,
-              size: job.media.size,
-            }
+            source: job.media.source,
+            filename: job.media.filename,
+            mimetype: job.media.mimetype,
+            size: job.media.size,
+          }
           : null,
         delayMs: job.delayMs,
       },
       success: true,
       error: null,
     });
-  } catch {}
+  } catch { }
 
   void processBroadcastQueue(input.sessionId);
   return job;

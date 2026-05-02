@@ -1,7 +1,7 @@
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { eq } from "drizzle-orm";
-import { actionLogs, appSettings, authSessions, users, waSessions } from "./schema.js";
+import { actionLogs, aiChats, appSettings, authSessions, users, waSessions } from "./schema.js";
 
 const pool = new Pool({
   ...(process.env.DATABASE_URL
@@ -18,7 +18,7 @@ const pool = new Pool({
 
 export const getDb = () => pool;
 export const db = drizzle(pool);
-export const appSchema = { appSettings, users, authSessions, waSessions, actionLogs };
+export const appSchema = { appSettings, users, authSessions, waSessions, actionLogs, aiChats };
 
 export const ensureSchema = async () => {
   const db = getDb();
@@ -102,6 +102,23 @@ export const ensureSchema = async () => {
   await db.query(
     `create index if not exists action_logs_created_at_idx on action_logs(created_at);`,
   );
+
+  await db.query(`
+    create table if not exists ai_chats (
+      id uuid primary key,
+      user_id uuid not null references users(id) on delete cascade,
+      conversation_id text not null,
+      role text not null,
+      content text not null,
+      model text,
+      created_at timestamptz not null default now()
+    );
+  `);
+
+  await db.query(`create index if not exists ai_chats_user_id_idx on ai_chats(user_id);`);
+  await db.query(`create index if not exists ai_chats_conv_id_idx on ai_chats(conversation_id);`);
+  await db.query(`create index if not exists ai_chats_created_at_idx on ai_chats(created_at);`);
+  await db.query(`alter table ai_chats add column if not exists reasoning text;`);
 };
 
 export const getSetting = async (key: string): Promise<string | null> => {

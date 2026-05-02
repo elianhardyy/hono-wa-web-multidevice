@@ -21,7 +21,7 @@ const buildPgUrl = () => {
 const databaseUrl = process.env.DATABASE_URL ?? buildPgUrl();
 
 export default defineConfig({
-  schema: "./src/backend/schema.ts",
+  schema: "./src/backend/config/schema.ts",
   dialect: "postgresql",
   dbCredentials: {
     url: databaseUrl,

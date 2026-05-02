@@ -3,9 +3,9 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import backendApp from "./backend/app.js";
 import frontendApp from "./frontend/app.js";
-import { restoreSessionsFromFile } from "./backend/session-manager.js";
-import { ensureDefaultAdmin } from "./backend/auth.js";
-import { ensureDefaultSettings, ensureSchema } from "./backend/db.js";
+import { restoreSessionsFromFile } from "./backend/session/session-manager.js";
+import { ensureDefaultAdmin } from "./backend/utils/auth.js";
+import { ensureDefaultSettings, ensureSchema } from "./backend/config/db.js";
 
 const app = new Hono();
 

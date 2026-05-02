@@ -94,3 +94,26 @@ export const actionLogs = pgTable(
     createdAtIndex: index("action_logs_created_at_idx").on(table.createdAt),
   }),
 );
+
+export const aiChats = pgTable(
+  "ai_chats",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id").notNull(),
+    role: text("role").notNull(), // 'user', 'assistant', 'system'
+    content: text("content").notNull(),
+    reasoning: text("reasoning"),
+    model: text("model"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    userIdIndex: index("ai_chats_user_id_idx").on(table.userId),
+    conversationIdIndex: index("ai_chats_conv_id_idx").on(table.conversationId),
+    createdAtIndex: index("ai_chats_created_at_idx").on(table.createdAt),
+  }),
+);

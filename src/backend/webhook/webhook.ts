@@ -3,9 +3,9 @@
 // URL webhook dikonfigurasi via environment variable WEBHOOK_URL
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { db as ormDb } from "./db.js";
+import { db as ormDb } from "../config/db.js";
 import { eq } from "drizzle-orm";
-import { waSessions } from "./schema.js";
+import { waSessions } from "../config/schema.js";
 
 export type WebhookEvent =
   | "message.received"

@@ -15,6 +15,7 @@ import { LoginPage } from "../frontend/pages/auth/login.js";
 import {
   BroadcastPage,
   ApiDocsPage,
+  AiPage,
   DashboardPage,
   HelpPage,
   MessagePage,
@@ -30,9 +31,9 @@ import {
   enqueueBroadcastJob,
   getOrCreateSession,
   formatPhone,
-} from "./session-manager.js";
-import { removeSessionFromFile } from "./session-store.js";
-import { SESSION_STATUS, type BroadcastResult } from "./types.js";
+} from "./session/session-manager.js";
+import { removeSessionFromFile } from "./session/session-store.js";
+import { SESSION_STATUS, type BroadcastResult } from "./utils/types.js";
 import {
   createAuthSession,
   createActionLog,
@@ -69,11 +70,11 @@ import {
   updateUserPassword,
   updateUserProfilePhotoUrl,
   verifyPassword,
-} from "./auth.js";
-import { db as ormDb, ensureDefaultSettings, ensureSchema, getDb } from "./db.js";
-import { invalidateWebhookCache } from "./webhook.js";
+} from "./utils/auth.js";
+import { db as ormDb, ensureDefaultSettings, ensureSchema, getDb } from "./config/db.js";
+import { invalidateWebhookCache } from "./webhook/webhook.js";
 import { and, eq } from "drizzle-orm";
-import { waSessions } from "./schema.js";
+import { waSessions } from "./config/schema.js";
 
 const require = createRequire(import.meta.url);
 const { MessageMedia } = require("whatsapp-web.js") as {
@@ -82,328 +83,49 @@ const { MessageMedia } = require("whatsapp-web.js") as {
 
 export const router = new Hono<{ Variables: { authUser: User } }>();
 
-const getAuthUser = async (c: any) => {
-  const sid = getCookie(c, "sid");
-  if (!sid) return null;
-  return await getUserBySessionId(sid);
-};
+import {
+  getAuthUser,
+  requireAuth,
+  requireAdmin,
+  getApiKeyFromRequest,
+  requireApiKey,
+} from "./middleware/auth.middleware.js";
 
-const requireAuth: MiddlewareHandler<{ Variables: { authUser: User } }> = async (
-  c,
-  next,
-) => {
-  const user = await getAuthUser(c);
-  if (!user) return c.redirect("/login");
-  const maintenance = await getMaintenanceMode();
-  if (maintenance && user.role !== "admin") {
-    deleteCookie(c, "sid");
-    return c.redirect("/login");
-  }
-  c.set("authUser", user);
-  await next();
-};
+import {
+  md5Hex,
+  getGravatarUrl,
+  getAvatarUrl,
+  DEFAULT_APP_LOGO_URL,
+  getUiSettings,
+  withToast,
+} from "./service/ui.service.js";
 
-const requireAdmin: MiddlewareHandler<{ Variables: { authUser: User } }> = async (
-  c,
-  next,
-) => {
-  const user = c.get("authUser");
-  if (!user || user.role !== "admin") return c.text("Forbidden", 403);
-  await next();
-};
+import {
+  saveUploadedFile,
+  type LoadedMedia,
+  isHttpUrl,
+  filenameFromUrl,
+  loadMediaFromUrl,
+  loadMediaFromUpload,
+  resolveMediaInput,
+} from "./service/media.service.js";
 
-const getApiKeyFromRequest = (c: any): string | null => {
-  const x = c.req.header("x-api-key");
-  if (x) return x.trim();
-  const auth = c.req.header("authorization");
-  if (!auth) return null;
-  const m = auth.match(/^Bearer\s+(.+)$/i);
-  if (!m?.[1]) return null;
-  return m[1].trim();
-};
+import {
+  UNSEND_WINDOW_MS,
+  HISTORY_ACTION_TYPES,
+  toHistoryActionType,
+  historyBasePath,
+  historyPathWithSession,
+  collectMessageIds,
+  isWithinUnsendWindow,
+  unsendByMessageIds,
+  jsonToCsv,
+} from "./service/message.service.js";
 
-const requireApiKey: MiddlewareHandler<{ Variables: { authUser: User } }> = async (
-  c,
-  next,
-) => {
-  const apiKey = getApiKeyFromRequest(c);
-  if (!apiKey) return c.json({ error: "missing_api_key" }, 401);
-  const user = await getUserByApiKey(apiKey);
-  if (!user) return c.json({ error: "invalid_api_key" }, 401);
-  const maintenance = await getMaintenanceMode();
-  if (maintenance && user.role !== "admin") {
-    return c.json({ error: "maintenance_mode" }, 403);
-  }
-  c.set("authUser", user);
-  await next();
-};
+import { isSessionAllowedForUser } from "./service/session.service.js";
 
-const isSessionAllowedForUser = async (user: User, sessionId: string) => {
-  if (user.role === "admin") return true;
-  const result = await ormDb
-    .select()
-    .from(waSessions)
-    .where(and(eq(waSessions.userId, user.id), eq(waSessions.sessionId, sessionId)))
-    .limit(1);
-  return result.length > 0;
-};
+import { handleAiChat, handleAiImage, getAiChatHistory, deleteAllAiChatHistory } from "./service/ai.service.js";
 
-const md5Hex = (value: string) =>
-  crypto.createHash("md5").update(value.trim().toLowerCase()).digest("hex");
-
-const getGravatarUrl = (key: string, size = 96) =>
-  `https://www.gravatar.com/avatar/${md5Hex(key)}?s=${size}&d=identicon&r=g`;
-
-const getAvatarUrl = (user: User) => {
-  if (user.profilePhotoUrl) return user.profilePhotoUrl;
-  const key = user.email?.trim() ? user.email : user.username;
-  return getGravatarUrl(key ?? user.username);
-};
-
-const DEFAULT_APP_LOGO_URL = "/assets/uploads/honowa.png";
-
-const getUiSettings = async () => {
-  const [appName, appDescription, appLogoUrl] = await Promise.all([
-    getAppName(),
-    getAppDescription(),
-    getAppLogoUrl(),
-  ]);
-  const customLogoUrl = appLogoUrl?.trim() ? appLogoUrl : null;
-  return {
-    appName,
-    appDescription,
-    appLogoUrl: customLogoUrl ?? DEFAULT_APP_LOGO_URL,
-    appLogoIsDefault: !customLogoUrl,
-  };
-};
-
-const saveUploadedFile = async (
-  file: any,
-  prefix: string,
-): Promise<string | null> => {
-  if (!file) return null;
-  if (typeof file.arrayBuffer !== "function") return null;
-  const buf = Buffer.from(await file.arrayBuffer());
-  if (buf.length === 0) return null;
-  if (buf.length > 2_500_000) return null;
-
-  const contentType = String(file.type ?? "");
-  const ext = (() => {
-    if (contentType === "image/png") return "png";
-    if (contentType === "image/jpeg") return "jpg";
-    if (contentType === "image/webp") return "webp";
-    if (contentType === "image/svg+xml") return "svg";
-    if (contentType === "image/x-icon" || contentType === "image/vnd.microsoft.icon")
-      return "ico";
-    const name = String(file.name ?? "");
-    const m = name.match(/\.([a-zA-Z0-9]+)$/);
-    if (m?.[1]) return m[1].toLowerCase();
-    return "png";
-  })();
-
-  const dir = path.resolve("public/assets/uploads");
-  await fs.mkdir(dir, { recursive: true });
-  const filename = `${prefix}-${Date.now()}-${crypto.randomUUID()}.${ext}`;
-  const abs = path.join(dir, filename);
-  await fs.writeFile(abs, buf);
-  return `/assets/uploads/${filename}`;
-};
-
-type LoadedMedia = {
-  mimetype: string;
-  dataB64: string;
-  filename: string;
-  size: number;
-  source: { kind: "url"; url: string } | { kind: "upload"; name: string | null };
-  isAudio: boolean;
-};
-
-const isHttpUrl = (value: string) => {
-  try {
-    const u = new URL(value);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
-};
-
-const filenameFromUrl = (value: string) => {
-  try {
-    const u = new URL(value);
-    const last = u.pathname.split("/").filter(Boolean).pop();
-    const raw = last ? decodeURIComponent(last) : "file";
-    const safe = raw.replace(/[\u0000-\u001f<>:"/\\|?*\u007f]/g, "_").trim();
-    return safe.length > 0 ? safe.slice(0, 120) : "file";
-  } catch {
-    return "file";
-  }
-};
-
-const loadMediaFromUrl = async (url: string, maxBytes: number): Promise<LoadedMedia> => {
-  if (!isHttpUrl(url)) throw new Error("invalid_media_url");
-  const res = await fetch(url, { redirect: "follow" as any });
-  if (!res.ok) throw new Error(`media_fetch_failed:${res.status}`);
-  const len = Number(res.headers.get("content-length") ?? "0");
-  if (Number.isFinite(len) && len > 0 && len > maxBytes) throw new Error("media_too_large");
-  const contentType = String(res.headers.get("content-type") ?? "application/octet-stream")
-    .split(";")[0]
-    .trim()
-    .toLowerCase();
-  const filename = filenameFromUrl(url);
-
-  let buf: Buffer;
-  if ((Readable as any).fromWeb && res.body) {
-    const chunks: Buffer[] = [];
-    let total = 0;
-    const stream = Readable.fromWeb(res.body as any);
-    for await (const chunk of stream) {
-      const b = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      total += b.length;
-      if (total > maxBytes) throw new Error("media_too_large");
-      chunks.push(b);
-    }
-    buf = Buffer.concat(chunks);
-  } else {
-    buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > maxBytes) throw new Error("media_too_large");
-  }
-
-  return {
-    mimetype: contentType || "application/octet-stream",
-    dataB64: buf.toString("base64"),
-    filename,
-    size: buf.length,
-    source: { kind: "url", url },
-    isAudio: (contentType || "").startsWith("audio/"),
-  };
-};
-
-const loadMediaFromUpload = async (file: any, maxBytes: number): Promise<LoadedMedia> => {
-  if (!file || typeof file.arrayBuffer !== "function") throw new Error("missing_media_file");
-  const size = Number(file.size ?? 0);
-  if (Number.isFinite(size) && size > maxBytes) throw new Error("media_too_large");
-  const buf = Buffer.from(await file.arrayBuffer());
-  if (buf.length === 0) throw new Error("empty_media_file");
-  if (buf.length > maxBytes) throw new Error("media_too_large");
-
-  const contentType = String(file.type ?? "application/octet-stream")
-    .split(";")[0]
-    .trim()
-    .toLowerCase();
-  const name = String(file.name ?? "").trim();
-  const filename = name.length > 0 ? name.slice(0, 120) : "file";
-
-  return {
-    mimetype: contentType || "application/octet-stream",
-    dataB64: buf.toString("base64"),
-    filename,
-    size: buf.length,
-    source: { kind: "upload", name: name || null },
-    isAudio: (contentType || "").startsWith("audio/"),
-  };
-};
-
-const resolveMediaInput = async (input: {
-  mediaUrl?: string;
-  mediaFile?: any;
-  maxBytes: number;
-}): Promise<LoadedMedia | null> => {
-  const url = String(input.mediaUrl ?? "").trim();
-  if (url) return await loadMediaFromUrl(url, input.maxBytes);
-  const file = input.mediaFile;
-  const hasFile =
-    file &&
-    typeof file.arrayBuffer === "function" &&
-    Number((file as any).size ?? 0) > 0;
-  if (hasFile) return await loadMediaFromUpload(file, input.maxBytes);
-  return null;
-};
-
-const withToast = (url: string, message: string, type: "success" | "error" | "info" = "info") => {
-  const sep = url.includes("?") ? "&" : "?";
-  return (
-    url +
-    sep +
-    "toast=" +
-    encodeURIComponent(message) +
-    "&toastType=" +
-    encodeURIComponent(type)
-  );
-};
-
-const UNSEND_WINDOW_MS = 48 * 60 * 60 * 1000;
-const HISTORY_ACTION_TYPES = new Set(["message", "broadcast", "status"]);
-type HistoryActionType = "message" | "broadcast" | "status";
-
-const toHistoryActionType = (value: string): HistoryActionType => {
-  if (!HISTORY_ACTION_TYPES.has(value)) return "message";
-  return value as HistoryActionType;
-};
-
-const historyBasePath = (actionType: HistoryActionType) => {
-  if (actionType === "broadcast") return "/admin/broadcast";
-  if (actionType === "status") return "/admin/status";
-  return "/admin/message";
-};
-
-const historyPathWithSession = (actionType: HistoryActionType, sessionId?: string) => {
-  const base = historyBasePath(actionType);
-  const sid = String(sessionId ?? "").trim();
-  if (!sid) return base;
-  return `${base}?sessionId=${encodeURIComponent(sid)}`;
-};
-
-const collectMessageIds = (payload: any): string[] => {
-  const direct = Array.isArray(payload?.sentMessageIds) ? payload.sentMessageIds : [];
-  const nested = Array.isArray(payload?.sentItems)
-    ? payload.sentItems.flatMap((item: any) =>
-        Array.isArray(item?.messageIds) ? item.messageIds : [],
-      )
-    : [];
-  return Array.from(
-    new Set(
-      [...direct, ...nested]
-        .map((v) => String(v ?? "").trim())
-        .filter(Boolean),
-    ),
-  );
-};
-
-const isWithinUnsendWindow = (createdAtIso?: string | null) => {
-  const ts = Date.parse(String(createdAtIso ?? ""));
-  if (!Number.isFinite(ts)) return false;
-  return Date.now() - ts <= UNSEND_WINDOW_MS;
-};
-
-const unsendByMessageIds = async (sessionId: string, messageIds: string[]) => {
-  const sessionData = sessions.get(sessionId) ?? getOrCreateSession(sessionId);
-  if (sessionData.status !== SESSION_STATUS.READY) {
-    throw new Error(`not_ready:${sessionData.status}`);
-  }
-  let revoked = 0;
-  for (const id of messageIds) {
-    const msg = await sessionData.client.getMessageById(id);
-    if (!msg) continue;
-    await msg.delete(true);
-    revoked++;
-  }
-  return revoked;
-};
-
-const jsonToCsv = (rows: Record<string, any>[]) => {
-  if (!rows.length) return "id,createdAt,sessionId,target,message,status,error\r\n";
-  const headers = Object.keys(rows[0]);
-  const esc = (v: any) => {
-    const s = String(v ?? "");
-    if (/[,"\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-    return s;
-  };
-  const lines = [
-    headers.join(","),
-    ...rows.map((row) => headers.map((h) => esc(row[h])).join(",")),
-  ];
-  return lines.join("\r\n") + "\r\n";
-};
 
 router.get("/login", async (c) => {
   try {
@@ -560,6 +282,7 @@ router.get("/admin/help", requireAuth, async (c) => {
       appDescription={appDescription}
       logoUrl={appLogoUrl}
       avatarUrl={avatarUrl}
+      role={user.role}
     />,
   );
 });
@@ -577,6 +300,7 @@ router.get("/admin/api-docs", requireAuth, async (c) => {
       appDescription={appDescription}
       logoUrl={appLogoUrl}
       avatarUrl={avatarUrl}
+      role={user.role}
       apiKeyLast4={user.apiKeyLast4 ?? null}
       apiKeyCreatedAt={user.apiKeyCreatedAt ?? null}
       newApiKey={flashApiKey ?? null}
@@ -812,6 +536,7 @@ router.get("/admin/profile", requireAuth, async (c) => {
       appDescription={ui.appDescription}
       logoUrl={ui.appLogoUrl}
       avatarUrl={avatarUrl}
+      role={user.role}
       gravatarUrl={gravatarUrl}
       profilePhotoUrl={user.profilePhotoUrl ?? null}
       email={user.email ?? ""}
@@ -1214,6 +939,7 @@ router.get("/admin/message", requireAuth, async (c) => {
       appDescription={appDescription}
       logoUrl={appLogoUrl}
       avatarUrl={avatarUrl}
+      role={user.role}
       waSessions={waSessions as any}
       selectedSessionId={selectedSessionId}
       mediaMaxMb={mediaMaxMb}
@@ -1253,6 +979,7 @@ router.post("/admin/message/send", requireAuth, async (c) => {
         appDescription={appDescription}
         logoUrl={appLogoUrl}
         avatarUrl={avatarUrl}
+        role={user.role}
         waSessions={waSessions as any}
         selectedSessionId={sessionId}
         mediaMaxMb={mediaMaxMb}
@@ -1277,6 +1004,7 @@ router.post("/admin/message/send", requireAuth, async (c) => {
         appDescription={appDescription}
         logoUrl={appLogoUrl}
         avatarUrl={avatarUrl}
+        role={user.role}
         waSessions={waSessions as any}
         selectedSessionId={sessionId}
         mediaMaxMb={mediaMaxMb}
@@ -1300,6 +1028,7 @@ router.post("/admin/message/send", requireAuth, async (c) => {
         appDescription={appDescription}
         logoUrl={appLogoUrl}
         avatarUrl={avatarUrl}
+        role={user.role}
         waSessions={waSessions as any}
         selectedSessionId={sessionId}
         mediaMaxMb={mediaMaxMb}
@@ -1348,6 +1077,7 @@ router.post("/admin/message/send", requireAuth, async (c) => {
           appDescription={appDescription}
           logoUrl={appLogoUrl}
           avatarUrl={avatarUrl}
+          role={user.role}
           waSessions={waSessions as any}
           selectedSessionId={sessionId}
           mediaMaxMb={mediaMaxMb}
@@ -1451,6 +1181,7 @@ router.post("/admin/message/send", requireAuth, async (c) => {
         appDescription={appDescription}
         logoUrl={appLogoUrl}
         avatarUrl={avatarUrl}
+        role={user.role}
         waSessions={waSessions as any}
         selectedSessionId={sessionId}
         mediaMaxMb={mediaMaxMb}
@@ -1483,6 +1214,7 @@ router.get("/admin/broadcast", requireAuth, async (c) => {
       appDescription={appDescription}
       logoUrl={appLogoUrl}
       avatarUrl={avatarUrl}
+      role={user.role}
       waSessions={waSessions as any}
       selectedSessionId={selectedSessionId}
       mediaMaxMb={mediaMaxMb}
@@ -1526,6 +1258,7 @@ router.post("/admin/broadcast/send", requireAuth, async (c) => {
         appDescription={appDescription}
         logoUrl={appLogoUrl}
         avatarUrl={avatarUrl}
+        role={user.role}
         waSessions={waSessions as any}
         selectedSessionId={sessionId}
         mediaMaxMb={mediaMaxMb}
@@ -1556,6 +1289,7 @@ router.post("/admin/broadcast/send", requireAuth, async (c) => {
         appDescription={appDescription}
         logoUrl={appLogoUrl}
         avatarUrl={avatarUrl}
+        role={user.role}
         waSessions={waSessions as any}
         selectedSessionId={sessionId}
         mediaMaxMb={mediaMaxMb}
@@ -1585,6 +1319,7 @@ router.post("/admin/broadcast/send", requireAuth, async (c) => {
         appDescription={appDescription}
         logoUrl={appLogoUrl}
         avatarUrl={avatarUrl}
+        role={user.role}
         waSessions={waSessions as any}
         selectedSessionId={sessionId}
         mediaMaxMb={mediaMaxMb}
@@ -1608,6 +1343,7 @@ router.post("/admin/broadcast/send", requireAuth, async (c) => {
         appDescription={appDescription}
         logoUrl={appLogoUrl}
         avatarUrl={avatarUrl}
+        role={user.role}
         waSessions={waSessions as any}
         selectedSessionId={sessionId}
         mediaMaxMb={mediaMaxMb}
@@ -1656,6 +1392,7 @@ router.get("/admin/status", requireAuth, async (c) => {
       appDescription={appDescription}
       logoUrl={appLogoUrl}
       avatarUrl={avatarUrl}
+      role={user.role}
       waSessions={waSessions as any}
       selectedSessionId={selectedSessionId}
       history={history as any}
@@ -1685,6 +1422,7 @@ router.post("/admin/status/create", requireAuth, async (c) => {
         appDescription={appDescription}
         logoUrl={appLogoUrl}
         avatarUrl={avatarUrl}
+        role={user.role}
         waSessions={waSessions as any}
         selectedSessionId={sessionId}
         alert="Session tidak valid untuk user ini"
@@ -1719,6 +1457,7 @@ router.post("/admin/status/create", requireAuth, async (c) => {
           appDescription={appDescription}
           logoUrl={appLogoUrl}
           avatarUrl={avatarUrl}
+          role={user.role}
           waSessions={waSessions as any}
           selectedSessionId={sessionId}
           history={history as any}
@@ -1766,6 +1505,7 @@ router.post("/admin/status/create", requireAuth, async (c) => {
             appDescription={appDescription}
             logoUrl={appLogoUrl}
             avatarUrl={avatarUrl}
+            role={user.role}
             waSessions={waSessions as any}
             selectedSessionId={sessionId}
             history={history as any}
@@ -1815,6 +1555,7 @@ router.post("/admin/status/create", requireAuth, async (c) => {
         appDescription={appDescription}
         logoUrl={appLogoUrl}
         avatarUrl={avatarUrl}
+        role={user.role}
         waSessions={waSessions as any}
         selectedSessionId={sessionId}
         history={history as any}
@@ -2863,4 +2604,39 @@ router.post("/broadcast/:sessionId", requireApiKey, async (c) => {
   } catch {}
 
   return c.json(response);
+});
+
+router.post("/api/ai/chat", requireAuth, async (c) => {
+  return handleAiChat(c);
+});
+
+router.post("/api/ai/image", requireAuth, async (c) => {
+  return handleAiImage(c);
+});
+
+router.delete("/api/ai/history", requireAuth, async (c) => {
+  const user = c.get("authUser");
+  await deleteAllAiChatHistory(user.id);
+  return c.json({ success: true, message: "History deleted" });
+});
+
+router.get("/admin/ai", requireAuth, async (c) => {
+  const user = c.get("authUser");
+  const { appName, appDescription, appLogoUrl } = await getUiSettings();
+  const avatarUrl = getAvatarUrl(user);
+  
+  // Ambil history terbaru
+  const history = await getAiChatHistory(user.id);
+  
+  return c.html(
+    <AiPage
+      appName={appName}
+      username={user.username}
+      appDescription={appDescription}
+      logoUrl={appLogoUrl}
+      avatarUrl={avatarUrl}
+      role={user.role}
+      history={history as any}
+    />,
+  );
 });
