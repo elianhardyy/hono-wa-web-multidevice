@@ -44,6 +44,15 @@ export const getOrCreateSession = (sessionId: string): SessionData => {
       headless: true,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
       bypassCSP: true,
+      executablePath:
+        process.platform === "linux"
+          ? [
+              "/usr/bin/google-chrome",
+              "/usr/bin/google-chrome-stable",
+              "/usr/bin/chromium-browser",
+              "/usr/bin/chromium",
+            ].find((p) => require("fs").existsSync(p))
+          : undefined,
     },
     authTimeoutMs: 60000,
   });
