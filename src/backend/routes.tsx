@@ -1668,7 +1668,7 @@ router.delete("/session/:sessionId", requireApiKey, handleDeleteSessionApi);
 
 router.post("/broadcast/:sessionId", requireApiKey, handleBroadcastApi);
 
-router.post("/api/ai/chat", requireApiKey, async (c) => {
+router.post("/api/ai/chat", async (c) => {
   return handleAiChat(c);
 });
 

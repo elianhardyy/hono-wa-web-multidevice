@@ -10,7 +10,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 
 
-export const DEFAULT_MODEL = "gemini-2.5-flash";
+export const DEFAULT_MODEL = "gemini-3.1-flash-lite";
 export const DEFAULT_IMAGE_MODEL = "imagen-4.0-generate-001";
 
 
